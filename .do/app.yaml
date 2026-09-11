@@ -1,0 +1,65 @@
+name: move-towel-desk
+region: fra
+services:
+  - name: web
+    github:
+      repo: chordsnstrings/towel
+      branch: main
+      deploy_on_push: true
+    source_dir: /
+    dockerfile_path: Dockerfile
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-1gb
+    http_port: 8080
+    health_check:
+      http_path: /api/health
+      initial_delay_seconds: 20
+      period_seconds: 10
+      timeout_seconds: 5
+      success_threshold: 1
+      failure_threshold: 3
+    envs:
+      - key: NODE_ENV
+        scope: RUN_TIME
+        value: production
+      - key: PORT
+        scope: RUN_TIME
+        value: "8080"
+      - key: APP_ORIGIN
+        scope: RUN_TIME
+        value: ${APP_URL}
+      - key: DATABASE_URL
+        scope: RUN_TIME
+        type: SECRET
+        value: ${towel-db.DATABASE_URL}
+      - key: DATABASE_CA_CERT
+        scope: RUN_TIME
+        type: SECRET
+        value: ${towel-db.CA_CERT}
+      - key: DATABASE_SSL
+        scope: RUN_TIME
+        value: "true"
+      - key: ADMIN_EMAIL
+        scope: RUN_TIME
+        value: admin@example.com
+      - key: ADMIN_PASSWORD
+        scope: RUN_TIME
+        type: SECRET
+        value: replace-with-a-unique-admin-password
+      - key: DEMO_MODE
+        scope: RUN_TIME
+        value: "false"
+databases:
+  - name: towel-db
+    engine: PG
+    production: true
+    cluster_name: move-towel-db
+    db_name: defaultdb
+    db_user: doadmin
+ingress:
+  rules:
+    - match:
+        path:
+          prefix: /
+      component:
+        name: web
