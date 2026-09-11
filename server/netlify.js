@@ -1,5 +1,4 @@
 import serverless from "serverless-http";
-import { getConnectionString } from "@netlify/database";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { isIP } from "node:net";
@@ -14,7 +13,6 @@ export function getNetlifyConfig(env = process.env) {
     ...getConfig({
       ...env,
       NODE_ENV: "production",
-      DATABASE_URL: env.DATABASE_URL || getConnectionString(),
     }),
     serverless: true,
     importWorkerPath: resolve(".netlify/runtime/import-worker.cjs"),

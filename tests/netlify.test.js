@@ -260,6 +260,11 @@ test("Netlify forces production settings and a failed initialization can recover
   assert.equal(config.production, true);
   assert.equal(config.demo, false);
   assert.equal(config.origin, origin);
+  assert.equal(config.databaseUrl, "postgres://example.test/db");
+  assert.throws(
+    () => getNetlifyConfig({ APP_ORIGIN: origin }),
+    /DATABASE_URL is required/,
+  );
   assert.throws(
     () =>
       getNetlifyConfig({

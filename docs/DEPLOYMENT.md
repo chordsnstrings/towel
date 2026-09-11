@@ -1,6 +1,6 @@
 # Deploy on Netlify
 
-Netlify serves the React frontend and runs the Express API as a Netlify Function. Netlify Database stores the members, towels, staff accounts, sessions and import previews. A separate backend server is not required.
+Netlify serves the React frontend and runs the Express API as a Netlify Function. A managed PostgreSQL database stores the members, towels, staff accounts, sessions and import previews. A separate backend server is not required. This app uses the standard PostgreSQL driver and does not automatically provision Netlify Database.
 
 ## Import the project
 
@@ -17,11 +17,20 @@ Use a GitHub import so Netlify deploys the function and packaged Excel reader as
 
 ## Create the database
 
-In your Netlify project, open **Data & Storage → Database** and select **Create a database manually**. The repository already includes `@netlify/database`, which reads Netlify's connection settings. Leave `DATABASE_URL` unset to use Netlify Database. See [Netlify's setup instructions](https://docs.netlify.com/build/data-and-storage/netlify-database/getting-started/).
+Use an existing managed PostgreSQL database or create one with [Neon](https://neon.com/):
 
-Netlify Database is available on credit-based plans, including Free. Database usage shares account credits with hosting and functions. Continuous daily reception use can exceed the free allowance; check the usage meter and [current pricing](https://www.netlify.com/pricing/). This repository does not choose or purchase a plan.
+1. Create a Neon project for the towel desk, choosing a region close to your Netlify Functions region.
+2. Open **Connect** in the project dashboard. Select the production branch, database and role, and turn **Connection pooling** off to show the direct connection string.
+3. Copy the PostgreSQL connection string. Copy only the URL beginning `postgresql://`, without a `psql` command or surrounding quotes.
+4. Save it as the secret `DATABASE_URL` in Netlify using the settings below. Keep the URL private; it contains the database password.
 
-This app manages its own versioned migrations in `server/migrations/`. They run automatically when the API initializes; a PostgreSQL advisory transaction lock prevents simultaneous instances from applying them twice. Do not copy these files into Netlify's native migration directory. No database changes happen during the frontend build. Netlify supports [custom migration systems](https://docs.netlify.com/build/data-and-storage/netlify-database/migrations/#manual-migrations).
+Neon offers a Free plan with usage limits; monitor its [current allowance](https://neon.com/pricing). Netlify hosting and function usage are billed separately. This repository does not select or purchase a paid plan. Use the direct URL for this app's connection-level timeout settings and automatic migrations; it maintains its own small connection pool. See Neon's [direct and pooled connection instructions](https://neon.com/docs/connect/connection-pooling).
+
+This app manages its own versioned migrations in `server/migrations/`. They run automatically when the API initializes; a PostgreSQL advisory transaction lock prevents simultaneous instances from applying them twice. No database changes happen during the frontend build. The database role needs permission to create and update tables in the app's database.
+
+### If a deploy fails with `createSiteDatabase` / `403 Forbidden`
+
+The message `database feature not available for this account` means Netlify refused native database provisioning before the app's build command ran. Earlier versions of this repository included a package that triggered that provisioning. Deploy the latest `main`, which removes that dependency, and configure the external `DATABASE_URL` above. Changing `ADMIN_PASSWORD` or retrying the old commit cannot resolve this account restriction.
 
 ## Set environment variables
 
@@ -29,6 +38,7 @@ In **Project configuration → Environment variables**, add the following for th
 
 | Variable         | Value                                                                            |
 | ---------------- | -------------------------------------------------------------------------------- |
+| `DATABASE_URL`   | Your provider's direct PostgreSQL connection URL. Mark it as secret.             |
 | `APP_ORIGIN`     | Your final HTTPS origin, such as `https://your-towel-desk.netlify.app`. No path. |
 | `ADMIN_EMAIL`    | The email address of the initial administrator.                                  |
 | `ADMIN_PASSWORD` | A unique password of 12–200 characters. Mark it as secret.                       |
@@ -39,15 +49,15 @@ Keep credentials out of GitHub, `netlify.toml`, and variables prefixed with `VIT
 
 The initial administrator is inserted only if that email does not already exist. Updating `ADMIN_PASSWORD` in Netlify does not reset an existing account.
 
-## Custom domains, previews and other database providers
+## Custom domains, previews and connection settings
 
 For a custom domain, set it as the Netlify primary domain, update `APP_ORIGIN` to that HTTPS origin and redeploy. Staff should use the canonical address: writes from other origins are rejected.
 
-Keep production administrator settings scoped to production. To use a Deploy Preview interactively, supply its own origin and test administrator settings. Netlify Database's SDK selects the appropriate database branch. Preview branches can contain a copy of production data, so restrict preview access.
+Keep the production database and administrator settings scoped to production. To use a Deploy Preview interactively, supply its own origin, test administrator settings and separate test `DATABASE_URL`. The app does not automatically create database branches. Without those preview settings, the frontend can build but its API remains unavailable.
 
-An optional secret `DATABASE_URL` overrides Netlify Database. Use your managed PostgreSQL provider's pooled connection URL and a database close to the Functions region. Set `DATABASE_CA_CERT` when the provider requires a private CA. TLS certificates are verified and TLS cannot be disabled in production. When using an external URL, configure a separate test database for previews explicitly.
+Use a database close to the Functions region. Set `DATABASE_CA_CERT` when the provider requires a private CA. TLS certificates are verified and TLS cannot be disabled in production. For Neon, keep its default secure connection settings; no custom CA is normally required. Do not set `DATABASE_SSL=false` in production.
 
-Each warm function instance reuses up to two database connections. Concurrent instances create additional pools, so a provider-side pooler helps stay within connection limits. Never use a local filesystem database on Netlify. The alternative Docker/App Platform setup is in [DIGITALOCEAN.md](DIGITALOCEAN.md).
+Each warm function instance reuses up to two database connections and closes idle connections after one second. Concurrent instances can open additional connections; monitor your provider's connection limit as use grows. Never use a local filesystem database on Netlify. The alternative Docker/App Platform setup is in [DIGITALOCEAN.md](DIGITALOCEAN.md).
 
 ## Operation and limits
 
@@ -63,7 +73,7 @@ Use the database provider's backups. A Netlify code rollback does not restore da
 
 ## Password recovery
 
-From a trusted local checkout, put the production `DATABASE_URL`, `NODE_ENV=production`, `APP_ORIGIN` and a new `RESET_PASSWORD` in a private `.env.recovery` file. Include `DATABASE_CA_CERT` if required. Obtain native database connection details from your Netlify account. Then run:
+From a trusted local checkout, put the production `DATABASE_URL`, `NODE_ENV=production`, `APP_ORIGIN` and a new `RESET_PASSWORD` in a private `.env.recovery` file. Include `DATABASE_CA_CERT` if required. Obtain the connection details from your database provider. Then run:
 
 ```bash
 node --env-file=.env.recovery server/reset-password.js staff@example.com

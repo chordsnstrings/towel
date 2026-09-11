@@ -11,7 +11,7 @@ A reception web app for MOVE at FIVE Jumeirah Village. Scan a member’s existin
 - **Excel `.xlsx` and CSV import** with column mapping, preview, row validation, barcode deduplication and transactional upserts. Leading-zero identifiers are preserved; numeric Excel barcode cells are rejected with a corrective message.
 - **Staff and administrator accounts** with hashed passwords, database sessions, role checks, CSRF protection, login rate limiting and a transaction audit trail.
 - **Activity filters and CSV export**, Dubai time throughout the desk, responsive touch controls and reduced-motion support.
-- **Netlify deployment configuration**, an Express API function, Netlify Database support, health checks, migrations and CI. A Docker/App Platform deployment is also available.
+- **Netlify deployment configuration**, an Express API function, managed PostgreSQL support, health checks, migrations and CI. A Docker/App Platform deployment is also available.
 
 This is a towel tracking system. It does not connect to the gym’s existing membership provider, take payments, or infer a member’s name from a barcode. Import the existing member/barcode mapping or add it manually before scanning live members.
 
@@ -45,11 +45,11 @@ Choose **Open demo desk**, then scan or type `DEMO-001`. This route is unavailab
 The complete guide is [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). The short path:
 
 1. Import this GitHub repository into Netlify, using `main`. [`netlify.toml`](netlify.toml) configures the frontend and backend build.
-2. In your Netlify project, open **Data & Storage → Database → Create a database manually**. The included SDK connects the backend to Netlify Database.
-3. Set `APP_ORIGIN` to your final HTTPS site origin, plus `ADMIN_EMAIL` and a unique secret `ADMIN_PASSWORD`, in Netlify's environment settings. Include the Functions scope if scope selection is available.
+2. Create a PostgreSQL database with a managed provider such as [Neon](https://neon.com/). For Neon, open **Connect**, turn **Connection pooling** off, and copy the direct connection string into a secret `DATABASE_URL` in Netlify's environment settings.
+3. Set `APP_ORIGIN` to your final HTTPS site origin, plus `ADMIN_EMAIL` and a unique secret `ADMIN_PASSWORD`, in the same settings. Include the Functions scope if scope selection is available.
 4. Redeploy, sign in, add staff accounts and import members. Database migrations run automatically before API requests are served.
 
-Netlify hosts both the frontend and backend; operational data survives restarts in managed PostgreSQL. Leave `DATABASE_URL` unset for Netlify Database, or set it to another provider's pooled PostgreSQL URL. The [Netlify guide](docs/DEPLOYMENT.md) covers setup, limits and recovery; the [DigitalOcean guide](docs/DIGITALOCEAN.md) covers the alternative Docker deployment.
+Netlify hosts both the frontend and backend; operational data survives restarts in the PostgreSQL database you configure. `DATABASE_URL` is required. The app does not request Netlify's native database feature, so accounts without that feature can deploy it. The [Netlify guide](docs/DEPLOYMENT.md) covers setup, limits and recovery; the [DigitalOcean guide](docs/DIGITALOCEAN.md) covers the alternative Docker deployment.
 
 ## Member import
 
