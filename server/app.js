@@ -1,6 +1,6 @@
 import express from "express";
 import helmet from "helmet";
-import { rateLimit } from "express-rate-limit";
+import { rateLimit, ipKeyGenerator } from "express-rate-limit";
 import multer from "multer";
 import { randomUUID } from "node:crypto";
 import { z, ZodError } from "zod";
@@ -26,9 +26,11 @@ import {
   suggestMapping,
   validateImport,
 } from "./imports.js";
+import { LoginLimitStore } from "./login-limit-store.js";
+import { MAX_IMPORT_BYTES } from "../shared/limits.js";
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 0 },
+  limits: { fileSize: MAX_IMPORT_BYTES, files: 1, fields: 0 },
 });
 const id = (value) => z.uuid().parse(value);
 const page = (req) =>
@@ -99,6 +101,9 @@ export async function createApp(db, config) {
   app.get("/api/config", (req, res) => res.json({ demo: config.demo }));
   const dummyHash = await hashPassword(randomUUID());
   const loginLimiter = rateLimit({
+    store: new LoginLimitStore(db),
+    keyGenerator: (req) =>
+      ipKeyGenerator(req.netlifyClientIp || req.ip || "unknown"),
     windowMs: 15 * 60000,
     limit: 20,
     standardHeaders: "draft-8",
@@ -411,7 +416,7 @@ export async function createApp(db, config) {
     upload.single("file"),
     async (req, res) => {
       if (!req.file) throw new AppError(400, "Choose a member file.");
-      const raw = await readImportFile(req.file),
+      const raw = await readImportFile(req.file, config.importWorkerPath),
         jobId = randomUUID();
       await db.query("DELETE FROM import_jobs WHERE expires_at<NOW()");
       await db.query(
@@ -559,7 +564,7 @@ export async function createApp(db, config) {
     if (err instanceof multer.MulterError)
       return res
         .status(400)
-        .json({ error: "Upload one CSV or Excel file, no larger than 5 MB." });
+        .json({ error: "Upload one CSV or Excel file, no larger than 4 MB." });
     if (err.code === "23505")
       return res.status(409).json({
         error:

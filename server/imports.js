@@ -2,6 +2,7 @@ import { Worker } from "node:worker_threads";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { AppError, memberSchema, audit } from "./domain.js";
+import { MAX_IMPORT_BYTES } from "../shared/limits.js";
 let activeWorkers = 0;
 export const importFields = [
   "barcode",
@@ -40,7 +41,15 @@ export function suggestMapping(headers) {
     ]),
   );
 }
-export async function readImportFile(file) {
+export async function readImportFile(
+  file,
+  workerPath = new URL("./import-worker.js", import.meta.url),
+) {
+  if (file.buffer.length > MAX_IMPORT_BYTES)
+    throw new AppError(
+      413,
+      "Upload one CSV or Excel file, no larger than 4 MB.",
+    );
   const extension = file.originalname.split(".").pop().toLowerCase();
   if (!["csv", "xlsx"].includes(extension))
     throw new AppError(400, "Choose a CSV or .xlsx Excel file.");
@@ -51,7 +60,7 @@ export async function readImportFile(file) {
     );
   activeWorkers++;
   return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL("./import-worker.js", import.meta.url), {
+    const worker = new Worker(workerPath, {
       workerData: { buffer: file.buffer, extension },
       resourceLimits: { maxOldGenerationSizeMb: 128 },
     });
@@ -143,6 +152,9 @@ export function validateImport(raw, mapping) {
 }
 export async function commitImport(db, staffId, jobId) {
   return db.transaction(async (tx) => {
+    // Imports share a lock so bulk upserts cannot deadlock across function instances.
+    if (db.kind === "postgres")
+      await tx.query("SELECT pg_advisory_xact_lock(64201902)");
     const job = (
       await tx.query(
         "SELECT * FROM import_jobs WHERE id=$1 AND staff_id=$2 FOR UPDATE",
@@ -161,36 +173,37 @@ export async function commitImport(db, staffId, jobId) {
       );
     let created = 0,
       updated = 0;
-    for (const row of [...job.preview].sort((a, b) =>
-      a.data.barcode.localeCompare(b.data.barcode),
-    )) {
+    const groups = new Map();
+    for (const row of job.preview) {
       const data = memberSchema.parse(row.data);
-      const existing = (
-        await tx.query("SELECT id FROM members WHERE barcode=$1 FOR UPDATE", [
-          data.barcode,
-        ])
-      ).rows[0];
-      if (existing) {
-        const fields = Object.keys(row.data).filter((k) => k !== "barcode");
-        await tx.query(
-          `UPDATE members SET ${fields.map((k, i) => `${k}=$${i + 1}`).join(",")},updated_at=NOW() WHERE id=$${fields.length + 1}`,
-          [...fields.map((k) => data[k]), existing.id],
+      // Group by provided optional fields to preserve unmapped/blank existing values.
+      const fields = [
+        "full_name",
+        "email",
+        "phone",
+        "membership",
+        "active",
+      ].filter((key) => Object.hasOwn(row.data, key));
+      const key = fields.join(",");
+      if (!groups.has(key)) groups.set(key, { fields, rows: [] });
+      groups.get(key).rows.push({ ...data, id: randomUUID() });
+    }
+    for (const { fields, rows } of groups.values()) {
+      rows.sort((a, b) => a.barcode.localeCompare(b.barcode));
+      for (let offset = 0; offset < rows.length; offset += 250) {
+        const batch = rows.slice(offset, offset + 250);
+        const proposedIds = new Set(batch.map((row) => row.id));
+        const saved = await tx.query(
+          `INSERT INTO members(id,barcode,full_name,email,phone,membership,active)
+           SELECT id,barcode,full_name,email,phone,membership,active
+           FROM jsonb_to_recordset($1::jsonb) AS r(id UUID,barcode TEXT,full_name TEXT,email TEXT,phone TEXT,membership TEXT,active BOOLEAN)
+           ORDER BY barcode
+           ON CONFLICT(barcode) DO UPDATE SET ${fields.map((field) => `${field}=EXCLUDED.${field}`).join(",")},updated_at=NOW()
+           RETURNING id`,
+          [JSON.stringify(batch)],
         );
-        updated++;
-      } else {
-        await tx.query(
-          "INSERT INTO members(id,barcode,full_name,email,phone,membership,active) VALUES ($1,$2,$3,$4,$5,$6,$7)",
-          [
-            randomUUID(),
-            data.barcode,
-            data.full_name,
-            data.email,
-            data.phone,
-            data.membership,
-            data.active,
-          ],
-        );
-        created++;
+        for (const row of saved.rows)
+          proposedIds.has(row.id) ? created++ : updated++;
       }
     }
     const result = { created, updated, total: created + updated };

@@ -3,8 +3,10 @@ import { fileURLToPath } from "node:url";
 import { getConfig } from "./config.js";
 import { createDatabase } from "./db.js";
 
-export async function migrate(db) {
-  const dir = new URL("./migrations/", import.meta.url);
+export async function migrate(
+  db,
+  dir = new URL("./migrations/", import.meta.url),
+) {
   await db.transaction(async (tx) => {
     if (db.kind === "postgres")
       await tx.query("SELECT pg_advisory_xact_lock(64201901)");

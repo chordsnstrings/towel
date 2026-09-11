@@ -59,6 +59,7 @@ const server = app.listen(config.port, "0.0.0.0", () =>
 const cleanup = setInterval(() => {
   db.query("DELETE FROM sessions WHERE expires_at<NOW()").catch(() => {});
   db.query("DELETE FROM import_jobs WHERE expires_at<NOW()").catch(() => {});
+  db.query("DELETE FROM login_limits WHERE reset_at<NOW()").catch(() => {});
 }, 3600000);
 cleanup.unref();
 let stopping = false;

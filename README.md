@@ -11,7 +11,7 @@ A reception web app for MOVE at FIVE Jumeirah Village. Scan a member’s existin
 - **Excel `.xlsx` and CSV import** with column mapping, preview, row validation, barcode deduplication and transactional upserts. Leading-zero identifiers are preserved; numeric Excel barcode cells are rejected with a corrective message.
 - **Staff and administrator accounts** with hashed passwords, database sessions, role checks, CSRF protection, login rate limiting and a transaction audit trail.
 - **Activity filters and CSV export**, Dubai time throughout the desk, responsive touch controls and reduced-motion support.
-- **DigitalOcean App Platform configuration**, a production Docker image, health checks, migrations and CI.
+- **Netlify deployment configuration**, an Express API function, Netlify Database support, health checks, migrations and CI. A Docker/App Platform deployment is also available.
 
 This is a towel tracking system. It does not connect to the gym’s existing membership provider, take payments, or infer a member’s name from a barcode. Import the existing member/barcode mapping or add it manually before scanning live members.
 
@@ -40,16 +40,16 @@ DEMO_MODE=true DATA_DIR=data/demo ADMIN_EMAIL= ADMIN_PASSWORD= npm run dev
 
 Choose **Open demo desk**, then scan or type `DEMO-001`. This route is unavailable in production, and production refuses to start with `DEMO_MODE=true`. No real member records or the supplied personal barcode are committed to this repository.
 
-## Deploy to DigitalOcean
+## Deploy to Netlify
 
 The complete guide is [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). The short path:
 
-1. Create a **Managed PostgreSQL cluster** named `move-towel-db` (or update the name in `.do/app.yaml`).
-2. Create an App Platform app using this GitHub repository and its **Dockerfile**. Apply [`.do/app.yaml`](.do/app.yaml), attach the managed database and allow the app as a database trusted source.
-3. Set `ADMIN_EMAIL` and a unique encrypted `ADMIN_PASSWORD`. `APP_ORIGIN`, `DATABASE_URL` and `DATABASE_CA_CERT` are supplied through DigitalOcean bindable variables in the spec.
-4. Deploy, sign in, add staff accounts and import members. Database migrations run automatically before the app accepts traffic.
+1. Import this GitHub repository into Netlify, using `main`. [`netlify.toml`](netlify.toml) configures the frontend and backend build.
+2. In your Netlify project, open **Data & Storage → Database → Create a database manually**. The included SDK connects the backend to Netlify Database.
+3. Set `APP_ORIGIN` to your final HTTPS site origin, plus `ADMIN_EMAIL` and a unique secret `ADMIN_PASSWORD`, in Netlify's environment settings. Include the Functions scope if scope selection is available.
+4. Redeploy, sign in, add staff accounts and import members. Database migrations run automatically before API requests are served.
 
-The spec deliberately uses a production managed database rather than an ephemeral filesystem or a development database. Existing live data survives restarts and deployments. You must create/attach the database and supply the administrator credentials; this repository does not create billable resources by itself.
+Netlify hosts both the frontend and backend; operational data survives restarts in managed PostgreSQL. Leave `DATABASE_URL` unset for Netlify Database, or set it to another provider's pooled PostgreSQL URL. The [Netlify guide](docs/DEPLOYMENT.md) covers setup, limits and recovery; the [DigitalOcean guide](docs/DIGITALOCEAN.md) covers the alternative Docker deployment.
 
 ## Member import
 
@@ -64,7 +64,7 @@ Use [the CSV template](public/member-import-template.csv) or an Excel workbook w
 | `membership` | Optional    | For example Movers, Shapers, Hotel guest or Staff.                    |
 | `active`     | Optional    | `active` / `inactive`, `true` / `false`, `yes` / `no`, or `1` / `0`.  |
 
-Files are limited to 5 MB, 5,000 rows and 50 columns. Only the first visible Excel worksheet is read. Uploads are parsed in bounded worker threads. Previews expire after 30 minutes. All rows must pass validation before any member is written; an import is atomic. Existing members are matched by barcode. Unmapped and blank optional fields preserve existing values; towel history is never replaced. Formula cells in mapped Excel columns are rejected.
+Files are limited to 4 MB, 5,000 rows and 50 columns. Only the first visible Excel worksheet is read. Uploads are parsed in bounded worker threads. Previews expire after 30 minutes. All rows must pass validation before any member is written; an import is atomic. Existing members are matched by barcode. Unmapped and blank optional fields preserve existing values; towel history is never replaced. Formula cells in mapped Excel columns are rejected.
 
 To change an existing barcode, edit the member profile. Importing a new barcode creates a new member, because the barcode is the import identity key.
 
@@ -72,7 +72,8 @@ To change an existing barcode, edit the member profile. Importing a new barcode 
 
 ```bash
 npm test
-npm run build
+npm run build:netlify
+npm run test:netlify-bundle
 npm audit --omit=dev
 ```
 
@@ -85,7 +86,8 @@ The supplied reference image was successfully decoded locally as Code 128 with i
 - `src/` — React application, scanner and styles.
 - `server/` — Express API, authentication, imports and transactional towel logic.
 - `server/migrations/` — ordered, versioned SQL migrations.
-- `.do/app.yaml` — DigitalOcean App Platform production specification.
+- `netlify.toml` and `netlify/functions/` — Netlify routing, security headers and API entry point.
+- `.do/app.yaml` — alternative DigitalOcean App Platform production specification.
 - `docs/DEPLOYMENT.md` — deployment, backups, camera setup and account recovery.
 - `docs/BRAND.md` — official brand references and asset provenance.
 

@@ -30,10 +30,12 @@ export async function createDatabase(config) {
     throw new Error("Database TLS is required in production.");
   const pool = new pg.Pool({
     connectionString: url.toString(),
-    max: 10,
+    max: config.serverless ? 2 : 10,
     connectionTimeoutMillis: 10000,
-    idleTimeoutMillis: 30000,
+    idleTimeoutMillis: config.serverless ? 1000 : 30000,
+    allowExitOnIdle: !!config.serverless,
     statement_timeout: 15000,
+    idle_in_transaction_session_timeout: 20000,
     ssl: config.databaseSsl
       ? {
           rejectUnauthorized: true,

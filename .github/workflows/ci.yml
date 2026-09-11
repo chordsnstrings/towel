@@ -31,10 +31,11 @@ jobs:
       - run: npm ci
       - run: npm test
       - name: Verify against PostgreSQL
-        run: node --test --test-concurrency=1 tests/app.test.js
+        run: npm test
         env:
           TEST_DATABASE_URL: postgres://move:ci-test-password@localhost:5432/move_test
-      - run: npm run build
+      - run: npm run build:netlify
+      - run: npm run test:netlify-bundle
       - run: npm audit --omit=dev --audit-level=high
       - name: Build production image
         run: docker build -t move-towel-desk:ci .

@@ -32,6 +32,7 @@ import {
 } from "lucide-react";
 import Scanner from "./Scanner.jsx";
 import { api, setCsrf, downloadActivity } from "./api.js";
+import { MAX_IMPORT_BYTES } from "../shared/limits.js";
 import "./styles.css";
 
 const dateTime = (v, date = false) =>
@@ -1496,6 +1497,11 @@ function ImportModal({ onClose, onSaved }) {
   const fileRef = useRef(null);
   async function upload(file) {
     if (!file) return;
+    if (file.size > MAX_IMPORT_BYTES) {
+      setError("Choose a file no larger than 4 MB.");
+      if (fileRef.current) fileRef.current.value = "";
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -1597,7 +1603,7 @@ function ImportModal({ onClose, onSaved }) {
                 </>
               )}
             </span>
-            <small>Up to 5 MB · 5,000 members · First worksheet</small>
+            <small>Up to 4 MB · 5,000 members · First worksheet</small>
           </button>
           <input
             type="file"
