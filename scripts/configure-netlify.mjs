@@ -48,7 +48,7 @@ try {
 } catch (error) {
   // CLI errors can contain URLs or response details: do not echo captured output.
   console.error(
-    "Database connection setup could not finish. Sign in with npm run neon:login and npm run netlify:login, verify project access, then retry.",
+    "Database connection setup could not finish. Verify Neon connection access and Netlify sign-in, then retry.",
   );
   console.error("Error type:", error.code || error.name);
   process.exitCode = 1;

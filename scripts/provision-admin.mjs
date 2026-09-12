@@ -41,7 +41,7 @@ try {
   );
 } catch (error) {
   console.error(
-    "Administrator setup could not finish. Check Neon sign-in and project access, then retry. Existing accounts are never reset by this command.",
+    "Administrator setup could not finish. Check Neon connection access, then retry. Existing accounts are never reset by this command.",
   );
   console.error("Error type:", error.code || error.name);
   process.exitCode = 1;

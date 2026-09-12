@@ -50,7 +50,7 @@ Sign in to the Neon and Netlify accounts that own the configured projects. These
 
 After setup, open `/api/health`: `{"status":"ok"}` confirms the API and database are ready. Subsequent GitHub pushes deploy automatically. SQL migrations run when a function starts; a database lock prevents concurrent migration attempts. Deployments preserve accounts and towel records.
 
-The repository also includes app-local Neon skills and an OAuth MCP configuration restricted to the selected project. CLI authentication remains necessary before provider operations can run.
+The repository also includes app-local Neon skills and an OAuth MCP configuration restricted to the selected project. When Neon is authenticated through MCP instead of the CLI, a trusted integration may supply a single JSON line containing `databaseUrl` through a private input pipe to either setup command with `--connection-stdin`. Use the direct connection for the configured production branch. Do not put the credential in shell arguments or logs. Netlify CLI sign-in is still required for uploading the private connection; Neon CLI sign-in is only required for the `neon:*` commands.
 
 ## Install the PWA
 
