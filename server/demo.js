@@ -20,11 +20,11 @@ export async function seedDemo(db) {
     ["DEMO-005", "Riley Parker", "Movers", 0],
     ["DEMO-006", "Jamie Wilson", "Shapers", 0],
   ];
-  for (const [barcode, name, type, balance] of people) {
+  for (const [index, [barcode, name, type, balance]] of people.entries()) {
     const memberId = randomUUID();
     await db.query(
-      "INSERT INTO members(id,barcode,full_name,membership) VALUES ($1,$2,$3,$4)",
-      [memberId, barcode, name, type],
+      "INSERT INTO members(id,barcode,full_name,membership,phone) VALUES ($1,$2,$3,$4,$5)",
+      [memberId, barcode, name, type, `+97150000010${index + 1}`],
     );
     await recordTransaction(db, staffId, {
       memberId,

@@ -21,6 +21,6 @@ After pushing, the included GitHub Actions workflow runs the integration suite a
 - HTTP/database and Netlify adapter integration tests passed.
 - Production frontend build passed.
 - Production dependency audit reported zero known vulnerabilities.
-- The supplied barcode image decoded successfully as Code 128 and matched the displayed identifier, including the leading zero. The personal image and identifier are excluded from this package.
+- Phone lookup, import identity matching, audited corrections and lost-response retries have dedicated API and reception DOM tests. Personal images and member records are excluded from this package.
 
-Physical front-camera operation, browser interaction on the reception device and a live hosting deployment still require verification. GitHub Actions reports PostgreSQL and deployment-package checks for each commit.
+GitHub Actions reports PostgreSQL and deployment-package checks for each commit. The linked Netlify site deploys `main` automatically. Check touch sizing on the reception device after an update.

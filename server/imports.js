@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { AppError, memberSchema, audit } from "./domain.js";
 import { MAX_IMPORT_BYTES } from "../shared/limits.js";
+import { normalizePhone } from "../shared/phone.js";
 let activeWorkers = 0;
 export const importFields = [
   "barcode",
@@ -28,7 +29,18 @@ export function suggestMapping(headers) {
     first_name: ["firstname", "givenname"],
     last_name: ["lastname", "surname"],
     email: ["email", "emailaddress"],
-    phone: ["phone", "mobile", "phonenumber", "mobilenumber"],
+    phone: [
+      "phone",
+      "mobile",
+      "phonenumber",
+      "mobilenumber",
+      "number",
+      "contactnumber",
+      "contactphone",
+      "telephone",
+      "tel",
+      "whatsapp",
+    ],
     membership: ["membership", "membershiptype", "type", "category"],
     active: ["active", "status"],
   };
@@ -109,12 +121,16 @@ export function validateImport(raw, mapping) {
       .min(-1)
       .max(raw.headers.length - 1),
   ).parse(mapping);
-  if (mapping.barcode < 0 || (mapping.full_name < 0 && mapping.first_name < 0))
-    throw new AppError(400, "Map the barcode and member name columns.");
+  if (
+    (mapping.barcode < 0 && mapping.phone < 0) ||
+    (mapping.full_name < 0 && mapping.first_name < 0)
+  )
+    throw new AppError(400, "Map the phone number and member name columns.");
   const used = Object.values(mapping).filter((v) => v >= 0);
   if (new Set(used).size !== used.length)
     throw new AppError(400, "Use each column only once.");
-  const seen = new Set();
+  const seen = new Set(),
+    seenPhones = new Set();
   return raw.records.map((record) => {
     const data = {},
       errors = [];
@@ -125,6 +141,10 @@ export function validateImport(raw, mapping) {
       if (field === "barcode" && cell.numeric)
         errors.push(
           "Barcode is a number in Excel. Format as Text and restore any missing leading zeros.",
+        );
+      if (field === "phone" && cell.numeric)
+        errors.push(
+          "Phone is a number in Excel. Format it as Text and check its leading zero or country code.",
         );
       if (field === "active") {
         const val = cell.value.toLowerCase();
@@ -145,9 +165,110 @@ export function validateImport(raw, mapping) {
       errors.push(
         ...checked.error.issues.map((e) => `${e.path.join(".")}: ${e.message}`),
       );
-    if (seen.has(data.barcode)) errors.push("Duplicate barcode in this file.");
-    seen.add(data.barcode);
+    else if (Object.hasOwn(data, "phone")) data.phone = checked.data.phone;
+    if (!data.barcode && !data.phone)
+      errors.push("A complete phone number is required.");
+    if (data.barcode && seen.has(data.barcode))
+      errors.push("Duplicate barcode in this file.");
+    if (data.barcode) seen.add(data.barcode);
+    const phone = normalizePhone(data.phone || "");
+    if (phone && seenPhones.has(phone))
+      errors.push(
+        "Duplicate phone number in this file. Review shared numbers separately.",
+      );
+    if (phone) seenPhones.add(phone);
     return { line: record.line, data, errors };
+  });
+}
+
+const nameKey = (value) => value.trim().replace(/\s+/g, " ").toLowerCase();
+
+export async function matchImport(db, rows) {
+  const keys = [
+    ...new Set(
+      rows
+        .map((row) => normalizePhone(row.data.phone || "")?.slice(1))
+        .filter(Boolean),
+    ),
+  ];
+  const references = rows.map((row) => row.data.barcode).filter(Boolean);
+  const names = [
+    ...new Set(
+      rows
+        .map((row) => (row.data.full_name ? nameKey(row.data.full_name) : ""))
+        .filter(Boolean),
+    ),
+  ];
+  const existing = (
+    await db.query(
+      "SELECT id,barcode,full_name,phone,phone_key,updated_at FROM members WHERE phone_key=ANY($1::text[]) OR barcode=ANY($2::text[]) OR lower(regexp_replace(trim(full_name), '\\s+', ' ', 'g'))=ANY($3::text[])",
+      [keys, references, names],
+    )
+  ).rows;
+  const byPhone = new Map(),
+    byName = new Map(),
+    byReference = new Map();
+  for (const member of existing) {
+    byReference.set(member.barcode, member);
+    if (member.phone_key) {
+      if (!byPhone.has(member.phone_key)) byPhone.set(member.phone_key, []);
+      byPhone.get(member.phone_key).push(member);
+    }
+    const name = nameKey(member.full_name);
+    if (!byName.has(name)) byName.set(name, []);
+    byName.get(name).push(member);
+  }
+  const targeted = new Set();
+  return rows.map((row) => {
+    const errors = [...row.errors];
+    const reference = row.data.barcode;
+    const phone = normalizePhone(row.data.phone || "")?.slice(1);
+    const matches = phone ? byPhone.get(phone) || [] : [];
+    let member = reference ? byReference.get(reference) : null;
+    if (member && matches.some((match) => match.id !== member.id))
+      errors.push(
+        "This phone is shared with another profile. Review shared numbers individually.",
+      );
+    if (!reference && matches.length > 1)
+      errors.push(
+        "This phone is shared by existing members. Review their profiles individually; this import will not merge them.",
+      );
+    else if (!reference && matches.length === 1) {
+      if (nameKey(row.data.full_name || "") === nameKey(matches[0].full_name))
+        member = matches[0];
+      else
+        errors.push(
+          "This phone is already saved under a different name. Check the member profile before importing.",
+        );
+    } else if (!member && matches.length)
+      errors.push(
+        "This phone already exists with another member reference. Check the member profile.",
+      );
+    if (
+      !reference &&
+      !matches.length &&
+      byName.has(nameKey(row.data.full_name || ""))
+    )
+      errors.push(
+        "This name already exists with another or missing phone number. Edit that profile first to preserve its history.",
+      );
+    if (member && targeted.has(member.id))
+      errors.push(
+        "Two rows would update the same member. Keep one row per member.",
+      );
+    if (member) targeted.add(member.id);
+    return {
+      ...row,
+      errors,
+      action: member ? "update" : "create",
+      target: member
+        ? {
+            id: member.id,
+            barcode: member.barcode,
+            updatedAt: new Date(member.updated_at).toISOString(),
+          }
+        : null,
+    };
   });
 }
 export async function commitImport(db, staffId, jobId) {
@@ -171,6 +292,24 @@ export async function commitImport(db, staffId, jobId) {
         400,
         "Fix every row error and preview the import before continuing.",
       );
+    if (job.preview.some((row) => !Object.hasOwn(row, "target")))
+      throw new AppError(409, "Preview this file again before importing.");
+    const current = await matchImport(
+      tx,
+      job.preview.map((row) => ({ ...row, errors: [] })),
+    );
+    if (
+      current.some(
+        (row, index) =>
+          row.errors.length ||
+          JSON.stringify(row.target) !==
+            JSON.stringify(job.preview[index].target),
+      )
+    )
+      throw new AppError(
+        409,
+        "Member details changed after this preview. Preview the file again before importing.",
+      );
     let created = 0,
       updated = 0;
     const groups = new Map();
@@ -186,19 +325,32 @@ export async function commitImport(db, staffId, jobId) {
       ].filter((key) => Object.hasOwn(row.data, key));
       const key = fields.join(",");
       if (!groups.has(key)) groups.set(key, { fields, rows: [] });
-      groups.get(key).rows.push({ ...data, id: randomUUID() });
+      const memberId = row.target?.id || randomUUID();
+      // A permanent internal ID owns history. Phone numbers are never row IDs.
+      const reference =
+        row.data.barcode || row.target?.barcode || "MEM-" + memberId;
+      groups
+        .get(key)
+        .rows.push({
+          ...data,
+          barcode: reference,
+          id: memberId,
+          isNew: !row.target,
+        });
     }
     for (const { fields, rows } of groups.values()) {
       rows.sort((a, b) => a.barcode.localeCompare(b.barcode));
       for (let offset = 0; offset < rows.length; offset += 250) {
         const batch = rows.slice(offset, offset + 250);
-        const proposedIds = new Set(batch.map((row) => row.id));
+        const proposedIds = new Set(
+          batch.filter((row) => row.isNew).map((row) => row.id),
+        );
         const saved = await tx.query(
           `INSERT INTO members(id,barcode,full_name,email,phone,membership,active)
            SELECT id,barcode,full_name,email,phone,membership,active
            FROM jsonb_to_recordset($1::jsonb) AS r(id UUID,barcode TEXT,full_name TEXT,email TEXT,phone TEXT,membership TEXT,active BOOLEAN)
            ORDER BY barcode
-           ON CONFLICT(barcode) DO UPDATE SET ${fields.map((field) => `${field}=EXCLUDED.${field}`).join(",")},updated_at=NOW()
+           ON CONFLICT(id) DO UPDATE SET ${fields.map((field) => `${field}=EXCLUDED.${field}`).join(",")},updated_at=NOW()
            RETURNING id`,
           [JSON.stringify(batch)],
         );

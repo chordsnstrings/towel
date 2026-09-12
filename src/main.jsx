@@ -18,7 +18,7 @@ import {
   Search,
   Settings2,
   ShieldCheck,
-  ScanLine,
+  Phone,
   Users,
   X,
   Upload,
@@ -30,7 +30,8 @@ import {
   History,
   LockKeyhole,
 } from "lucide-react";
-import Scanner from "./Scanner.jsx";
+import PhoneDesk, { TowelActions } from "./PhoneDesk.jsx";
+import { formatPhone } from "../shared/phone.js";
 import PwaFeatures from "./Pwa.jsx";
 import { api, setCsrf, downloadActivity } from "./api.js";
 import { MAX_IMPORT_BYTES } from "../shared/limits.js";
@@ -266,7 +267,8 @@ function App() {
     [config, setConfig] = useState({ demo: false }),
     [page, setPage] = useState("desk"),
     [toast, setToast] = useState(""),
-    [connection, setConnection] = useState("");
+    [connection, setConnection] = useState(""),
+    [deskBusy, setDeskBusy] = useState(false);
   useEffect(() => {
     Promise.all([
       api("/config").then(setConfig),
@@ -337,7 +339,7 @@ function App() {
     );
   const admin = session.user.role === "admin";
   const nav = [
-    ["desk", "Towel desk", ScanLine],
+    ["desk", "Towel desk", Phone],
     ["outstanding", "Outstanding", Layers],
     ["members", "Members", Users],
     ["activity", "Activity", History],
@@ -348,6 +350,7 @@ function App() {
       <header className="header">
         <button
           className="brand-button"
+          disabled={deskBusy}
           onClick={() => setPage("desk")}
           aria-label="Towel desk home"
         >
@@ -364,6 +367,7 @@ function App() {
             <button
               key={key}
               className={page === key ? "active" : ""}
+              disabled={deskBusy}
               onClick={() => setPage(key)}
             >
               <Icon size={17} />
@@ -381,6 +385,7 @@ function App() {
             className="icon-button"
             aria-label="My account"
             title="My account"
+            disabled={deskBusy}
             onClick={() => setPage("account")}
           >
             <LockKeyhole size={18} />
@@ -388,6 +393,7 @@ function App() {
           <button
             className="icon-button"
             aria-label="Sign out"
+            disabled={deskBusy}
             onClick={logout}
           >
             <LogOut size={18} />
@@ -402,7 +408,13 @@ function App() {
       )}
       <main className="workspace">
         {page === "desk" ? (
-          <Desk admin={admin} notify={setToast} onNavigate={setPage} />
+          <PhoneDesk
+            admin={admin}
+            notify={setToast}
+            onNavigate={setPage}
+            MemberForm={MemberForm}
+            onBusyChange={setDeskBusy}
+          />
         ) : page === "outstanding" ? (
           <Members outstanding admin={admin} notify={setToast} />
         ) : page === "members" ? (
@@ -444,588 +456,90 @@ function App() {
   );
 }
 
-function Desk({ admin, notify, onNavigate }) {
-  const [dashboard, setDashboard] = useState(null),
-    [error, setError] = useState(""),
-    [barcode, setBarcode] = useState(""),
-    [search, setSearch] = useState(""),
-    [results, setResults] = useState([]),
-    [member, setMember] = useState(null),
-    [scanBusy, setScanBusy] = useState(false),
-    [newMember, setNewMember] = useState(false),
-    [scannerKey, setScannerKey] = useState(0);
-  const busyRef = useRef(false),
-    searchVersion = useRef(0);
-  const load = () =>
-    api("/dashboard")
-      .then((d) => {
-        setDashboard(d);
-      })
-      .catch((e) => setError(e.message));
-  useEffect(() => {
-    load();
-    const i = setInterval(load, 20000);
-    return () => clearInterval(i);
-  }, []);
-  useEffect(() => {
-    const version = ++searchVersion.current;
-    if (search.trim().length < 2) {
-      setResults([]);
-      return;
-    }
-    const t = setTimeout(
-      () =>
-        api("/members?q=" + encodeURIComponent(search))
-          .then((d) => {
-            if (version === searchVersion.current)
-              setResults(d.rows.slice(0, 5));
-          })
-          .catch((e) => setError(e.message)),
-      250,
-    );
-    return () => clearTimeout(t);
-  }, [search]);
-  async function scan(value) {
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setScanBusy(true);
-    setError("");
-    try {
-      const found = await api(
-        "/members/lookup?barcode=" + encodeURIComponent(value.trim()),
-      );
-      setMember(found);
-      setBarcode("");
-      setSearch("");
-    } catch (e) {
-      setError(e.message);
-      setBarcode(value);
-    } finally {
-      busyRef.current = false;
-      setScanBusy(false);
-    }
-  }
-  function close() {
-    setMember(null);
-    setScannerKey((v) => v + 1);
-    load();
-  }
-  const stats = [
-    [
-      "With members",
-      dashboard?.outstanding,
-      `${dashboard?.members_out ?? 0} members`,
-      Layers,
-    ],
-    ["Checked out today", dashboard?.issued, "Towels handed out", ArrowUpRight],
-    ["Returned today", dashboard?.returned, "Towels received", ArrowDownLeft],
-    ["Overdue", dashboard?.overdue, "Past the return window", Clock3],
-  ];
-  return (
-    <>
-      <PageTitle title="TOWEL DESK" eyebrow="RECEPTION / FIVE JUMEIRAH VILLAGE">
-        <div className="today">
-          <Clock3 size={17} />
-          {new Intl.DateTimeFormat("en-GB", {
-            timeZone: "Asia/Dubai",
-            weekday: "short",
-            day: "numeric",
-            month: "long",
-          }).format(new Date())}
-        </div>
-      </PageTitle>
-      <section className="stats" aria-label="Towel overview">
-        {stats.map(([label, value, caption, Icon], i) => (
-          <div
-            key={label}
-            className={"stat " + (i === 3 && value ? "attention" : "")}
-          >
-            <div className="stat-label">
-              {label}
-              <Icon size={18} />
-            </div>
-            <strong>
-              {value ?? "—"}
-              <span>{i === 0 ? "OUT" : ""}</span>
-            </strong>
-            <small>{caption}</small>
-          </div>
-        ))}
-      </section>
-      <div className="desk-grid">
-        <div className="scan-column">
-          <div className="section-heading">
-            <h2>SCAN. SELECT. ALL SET.</h2>
-            <span>01 / MEMBER IDENTIFICATION</span>
-          </div>
-          <Scanner
-            key={scannerKey}
-            onScan={scan}
-            paused={!!member || scanBusy || !!error || newMember}
-          />
-          <form
-            className="manual-form"
-            onSubmit={(e) => {
-              e.preventDefault();
-              scan(barcode);
-            }}
-          >
-            <label htmlFor="manual-barcode">
-              <ScanLine size={18} /> Or enter a barcode
-            </label>
-            <div>
-              <input
-                id="manual-barcode"
-                autoComplete="off"
-                spellCheck="false"
-                placeholder="Member barcode"
-                value={barcode}
-                onChange={(e) => setBarcode(e.target.value)}
-                required
-                maxLength={128}
-              />
-              <button
-                className="button primary"
-                disabled={scanBusy || !barcode.trim()}
-              >
-                {scanBusy ? (
-                  <Spinner />
-                ) : (
-                  <>
-                    Find member <ArrowRight size={18} />
-                  </>
-                )}
-              </button>
-            </div>
-          </form>
-          <ErrorNotice>{error}</ErrorNotice>
-          {error && (
-            <button
-              className="text-button retry-scan"
-              onClick={() => {
-                setError("");
-                setScannerKey((v) => v + 1);
-              }}
-            >
-              <RefreshCw size={16} /> Scan again
-            </button>
-          )}
-          <div className="desk-notes">
-            <ShieldCheck size={19} />
-            <span>
-              Scan to identify a member. Every towel movement is confirmed
-              before it is saved.
-            </span>
-          </div>
-        </div>
-        <aside className="desk-aside">
-          <section className="find-member">
-            <div className="section-heading">
-              <h2>FIND A MEMBER</h2>
-              <Users size={19} />
-            </div>
-            <p>No barcode to hand? Search their name.</p>
-            <div className="search-input">
-              <Search size={19} />
-              <input
-                aria-label="Find member by name"
-                placeholder="Search name or barcode"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-              {search && (
-                <button aria-label="Clear search" onClick={() => setSearch("")}>
-                  <X size={16} />
-                </button>
-              )}
-            </div>
-            {search.length >= 2 ? (
-              <div className="search-results">
-                {results.length ? (
-                  results.map((m) => (
-                    <button
-                      className="member-result"
-                      key={m.id}
-                      onClick={() => {
-                        setMember(m);
-                        setSearch("");
-                      }}
-                    >
-                      <Avatar name={m.full_name} />
-                      <span>
-                        <strong>{m.full_name}</strong>
-                        <small>
-                          {m.membership} · {m.barcode}
-                        </small>
-                      </span>
-                      <Badge>
-                        {m.outstanding
-                          ? plural(m.outstanding) + " out"
-                          : "All returned"}
-                      </Badge>
-                    </button>
-                  ))
-                ) : (
-                  <p className="search-empty">No matching members.</p>
-                )}
-              </div>
-            ) : (
-              <div className="search-hint">
-                <span>MEMBER DIRECTORY</span>
-                <button onClick={() => onNavigate("members")}>
-                  View members <ArrowUpRight size={16} />
-                </button>
-              </div>
-            )}
-            {admin && (
-              <button
-                className="text-button"
-                onClick={() => setNewMember(true)}
-              >
-                <Plus size={17} /> Add a new member
-              </button>
-            )}
-          </section>
-          <section className="recent-section">
-            <div className="section-heading">
-              <h2>RECENT ACTIVITY</h2>
-              <button
-                className="text-button"
-                onClick={() => onNavigate("activity")}
-              >
-                View all <ArrowUpRight size={16} />
-              </button>
-            </div>
-            {!dashboard ? (
-              <div className="loading-row">
-                <Spinner /> Loading activity
-              </div>
-            ) : !dashboard.recent.length ? (
-              <Empty title="A fresh start">
-                Towel checkouts and returns will appear here.
-              </Empty>
-            ) : (
-              <div className="recent-list">
-                {dashboard.recent.slice(0, 5).map((t) => (
-                  <div className="recent-row" key={t.id}>
-                    <span className={"movement-icon " + t.kind}>
-                      {t.kind === "checkout" ? (
-                        <ArrowUpRight size={19} />
-                      ) : (
-                        <ArrowDownLeft size={19} />
-                      )}
-                    </span>
-                    <div>
-                      <strong>{t.full_name}</strong>
-                      <span>
-                        {t.kind === "checkout" ? "Checked out" : "Returned"}{" "}
-                        {plural(t.quantity)}
-                      </span>
-                    </div>
-                    <time>{dateTime(t.created_at)}</time>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-          <div className="return-reminder">
-            <div>
-              <span className="eyebrow">FINISHED YOUR SESSION?</span>
-              <h3>
-                SAME SCAN.
-                <br />
-                EASY RETURN.
-              </h3>
-            </div>
-            <ArrowDownLeft size={36} strokeWidth={1} />
-            <p>
-              Scan the member again to see and return their outstanding towels.
-            </p>
-          </div>
-        </aside>
-      </div>
-      {member && (
-        <TransactionModal
-          member={member}
-          onClose={close}
-          onSaved={(m) => {
-            notify(m);
-            load();
-          }}
-        />
-      )}
-      {newMember && (
-        <MemberForm
-          initial={{ barcode }}
-          onClose={() => setNewMember(false)}
-          onSaved={(m) => {
-            setNewMember(false);
-            setMember({ ...m, outstanding: 0 });
-            notify("Member added.");
-          }}
-        />
-      )}
-    </>
-  );
-}
-
-function TransactionModal({ member: initial, onClose, onSaved }) {
-  const [member, setMember] = useState(initial),
-    [settings, setSettings] = useState(null),
-    [kind, setKind] = useState(initial.outstanding > 0 ? "return" : "checkout"),
-    [quantity, setQuantity] = useState(initial.outstanding || 1),
+function TransactionModal({ member, onClose, onSaved }) {
+  const [result, setResult] = useState(null),
     [busy, setBusy] = useState(false),
-    [loading, setLoading] = useState(true),
     [error, setError] = useState(""),
-    [success, setSuccess] = useState(null),
-    [notes, setNotes] = useState("");
-  const request = useRef(null),
-    submitting = useRef(false);
-  async function refresh() {
-    setLoading(true);
-    try {
-      const [m, s] = await Promise.all([
-        api("/members/" + initial.id),
-        api("/settings"),
-      ]);
-      setMember(m);
-      setSettings(s);
-      setQuantity((q) =>
-        Math.max(
-          1,
-          Math.min(
-            q,
-            kind === "return"
-              ? m.outstanding
-              : s.max_outstanding - m.outstanding,
-          ),
-        ),
-      );
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
-  }
-  useEffect(() => {
-    refresh();
-  }, []);
-  const max =
-    kind === "return"
-      ? member.outstanding
-      : Math.max(0, (settings?.max_outstanding || 0) - member.outstanding);
-  function switchKind(value) {
-    setKind(value);
-    setQuantity(value === "return" ? Math.max(1, member.outstanding) : 1);
-    setError("");
-    request.current = null;
-  }
-  async function submit() {
-    if (submitting.current) return;
-    submitting.current = true;
+    [unknown, setUnknown] = useState(false);
+  const undoId = useRef(null),
+    pending = useRef(false);
+  async function undo() {
+    if (pending.current) return;
+    pending.current = true;
     setBusy(true);
     setError("");
-    const fingerprint = JSON.stringify({
-      memberId: member.id,
-      kind,
-      quantity,
-      notes,
-    });
-    if (request.current?.fingerprint !== fingerprint)
-      request.current = { fingerprint, id: crypto.randomUUID() };
+    undoId.current ||= crypto.randomUUID();
     try {
-      const { transaction, currentBalance } = await api("/transactions", {
-        method: "POST",
-        body: {
-          memberId: member.id,
-          kind,
-          quantity,
-          notes,
-          requestId: request.current.id,
-        },
-      });
-      setSuccess({ ...transaction, currentBalance });
-      onSaved(
-        `${plural(transaction.quantity)} ${kind === "checkout" ? "checked out" : "returned"}.`,
+      const correction = await api(
+        `/transactions/${result.transaction.id}/undo`,
+        { method: "POST", body: { requestId: undoId.current } },
       );
+      setResult({ ...correction, isCorrection: true });
+      setUnknown(false);
+      onSaved("Handover corrected.");
     } catch (e) {
+      setUnknown(!e.status || e.status >= 500);
       setError(e.message);
-      if (e.status === 409) await refresh();
     } finally {
+      pending.current = false;
       setBusy(false);
-      submitting.current = false;
     }
   }
   return (
     <Modal
-      title={success ? "ALL SET." : "MEMBER IDENTIFIED"}
+      title={result ? "ALL SET." : "TOWEL HANDOVER"}
       onClose={() => {
-        if (!busy) onClose();
+        if (!busy && !unknown) onClose();
       }}
     >
-      {success ? (
-        <div className="success">
+      {result ? (
+        <div className="phone-saved">
           <span className="success-icon">
-            <Check size={42} />
+            <Check size={32} />
           </span>
           <p className="eyebrow">{member.full_name}</p>
-          <h3>
-            {plural(success.quantity)}
-            <br />
-            {success.kind === "checkout" ? "checked out." : "returned."}
-          </h3>
-          <p>
-            {success.currentBalance
-              ? `${plural(success.currentBalance)} still with this member.`
-              : "All towels returned. Thank you."}
-          </p>
-          <button autoFocus className="button primary full" onClick={onClose}>
+          <h2>
+            {result.isCorrection
+              ? "Handover corrected."
+              : `${plural(result.transaction.quantity)} ${result.transaction.kind === "return" ? "returned." : "handed over."}`}
+          </h2>
+          <p>{plural(result.currentBalance)} with member.</p>
+          <ErrorNotice>{error}</ErrorNotice>
+          {!result.isCorrection && (
+            <button
+              className="button secondary full"
+              disabled={busy}
+              onClick={undo}
+            >
+              {busy ? (
+                <Spinner />
+              ) : unknown ? (
+                "Retry same undo"
+              ) : (
+                "Undo this handover"
+              )}
+            </button>
+          )}
+          <button
+            className="button primary full"
+            disabled={busy || unknown}
+            onClick={onClose}
+          >
             Next member <ArrowRight size={19} />
           </button>
         </div>
       ) : (
-        <>
-          <div className="member-identity">
-            <Avatar name={member.full_name} large />
-            <div>
-              <h3>{member.full_name}</h3>
-              <p>
-                {member.membership}
-                <span>·</span>
-                <code>{member.barcode}</code>
-              </p>
-              <Badge tone={!member.active ? "warning" : ""}>
-                {member.active ? "Active member" : "Inactive member"}
-              </Badge>
-            </div>
-          </div>
-          <div className="balance-banner">
-            <span>Currently with member</span>
-            <strong>{plural(member.outstanding)}</strong>
-            {member.overdue > 0 && (
-              <Badge tone="warning">{plural(member.overdue)} overdue</Badge>
-            )}
-          </div>
-          <div className="segmented" aria-label="Towel action">
-            <button
-              className={kind === "checkout" ? "selected" : ""}
-              onClick={() => switchKind("checkout")}
-              disabled={busy || !member.active}
-            >
-              <ArrowUpRight size={18} /> Check out
-            </button>
-            <button
-              className={kind === "return" ? "selected" : ""}
-              onClick={() => switchKind("return")}
-              disabled={busy || !member.outstanding}
-            >
-              <ArrowDownLeft size={18} /> Return
-            </button>
-          </div>
-          {loading ? (
-            <div className="loading-row">
-              <Spinner /> Checking balance
-            </div>
-          ) : (
-            <>
-              <p className="quantity-label">
-                {kind === "return"
-                  ? "How many towels are coming back?"
-                  : "How many towels are they taking?"}
-              </p>
-              <div className="quantity-picker">
-                <button
-                  aria-label="Decrease towels"
-                  disabled={quantity <= 1 || busy}
-                  onClick={() => setQuantity((n) => n - 1)}
-                >
-                  <Minus size={23} />
-                </button>
-                <div>
-                  <strong>{max === 0 ? 0 : quantity}</strong>
-                  <span>TOWELS</span>
-                </div>
-                <button
-                  aria-label="Increase towels"
-                  disabled={quantity >= max || busy}
-                  onClick={() => setQuantity((n) => n + 1)}
-                >
-                  <Plus size={23} />
-                </button>
-              </div>
-              <div className="quantity-shortcuts">
-                {[1, 2, 3]
-                  .filter((n) => n <= max)
-                  .map((n) => (
-                    <button
-                      key={n}
-                      className={n === quantity ? "chosen" : ""}
-                      onClick={() => setQuantity(n)}
-                      disabled={busy}
-                    >
-                      {n}
-                    </button>
-                  ))}
-                {kind === "return" && max > 0 && (
-                  <button onClick={() => setQuantity(max)} disabled={busy}>
-                    Return all ({max})
-                  </button>
-                )}
-                <span>
-                  {kind === "checkout"
-                    ? `${max} available within member limit`
-                    : `${plural(Math.max(0, member.outstanding - quantity))} will remain`}
-                </span>
-              </div>
-              {max === 0 && (
-                <ErrorNotice>
-                  {kind === "return"
-                    ? "No towels outstanding."
-                    : "This member has reached their towel limit."}
-                </ErrorNotice>
-              )}
-              <label className="optional-note">
-                Note <span>(optional)</span>
-                <input
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  maxLength={500}
-                  placeholder="Anything reception should know?"
-                  disabled={busy}
-                />
-              </label>
-            </>
-          )}
-          <ErrorNotice>{error}</ErrorNotice>
-          <button
-            className="button primary full confirm-button"
-            disabled={
-              busy ||
-              loading ||
-              !settings ||
-              max < 1 ||
-              quantity > max ||
-              (!member.active && kind === "checkout")
-            }
-            onClick={submit}
-          >
-            {busy ? (
-              <>
-                <Spinner /> Saving…
-              </>
-            ) : (
-              <>
-                {kind === "return" ? "Confirm return" : "Confirm checkout"} ·{" "}
-                {plural(max === 0 ? 0 : quantity)} <ArrowRight size={18} />
-              </>
-            )}
-          </button>
-          <p className="dialog-footnote">
-            {kind === "return"
-              ? "Confirm once the towels have been received."
-              : "Confirm once the towels have been handed over."}
-          </p>
-        </>
+        <TowelActions
+          initial={member}
+          onBack={onClose}
+          onBusyChange={setBusy}
+          onSaved={(data) => {
+            setResult(data);
+            onSaved(
+              `${plural(data.transaction.quantity)} ${data.transaction.kind === "return" ? "returned" : "handed over"}.`,
+            );
+          }}
+        />
       )}
     </Modal>
   );
@@ -1036,7 +550,6 @@ function MemberForm({ initial = {}, onClose, onSaved }) {
       Object.fromEntries(
         Object.entries({
           full_name: "",
-          barcode: "",
           email: "",
           phone: "",
           membership: "Member",
@@ -1083,16 +596,20 @@ function MemberForm({ initial = {}, onClose, onSaved }) {
           />
         </label>
         <label>
-          Member barcode
+          Phone number
           <input
-            required
-            value={data.barcode}
-            autoComplete="off"
-            spellCheck="false"
-            maxLength={128}
-            onChange={(e) => field("barcode", e.target.value)}
+            type="tel"
+            autoComplete="tel"
+            required={!initial.id}
+            value={data.phone}
+            maxLength={40}
+            placeholder="05… or +971…"
+            onChange={(e) => field("phone", e.target.value)}
           />
-          <small>Enter the full barcode, including any leading zeros.</small>
+          <small>
+            Use a UAE number or include the international country code. Changing
+            a number keeps this member’s history.
+          </small>
         </label>
         <div className="two-fields">
           <label>
@@ -1102,15 +619,6 @@ function MemberForm({ initial = {}, onClose, onSaved }) {
               value={data.email}
               maxLength={254}
               onChange={(e) => field("email", e.target.value)}
-            />
-          </label>
-          <label>
-            Phone <span>(optional)</span>
-            <input
-              type="tel"
-              value={data.phone}
-              maxLength={40}
-              onChange={(e) => field("phone", e.target.value)}
             />
           </label>
         </div>
@@ -1244,7 +752,7 @@ function Members({ outstanding = false, admin, notify }) {
         <p>
           {outstanding
             ? "See who has towels, and record returns as they arrive."
-            : "Member profiles, barcodes, and towel balances in one place."}
+            : "Member names, phone numbers, and towel balances in one place."}
         </p>
         <span>
           {data?.total ?? "—"} {outstanding ? "members with towels" : "members"}
@@ -1255,7 +763,7 @@ function Members({ outstanding = false, admin, notify }) {
           <Search size={19} />
           <input
             aria-label="Search members"
-            placeholder="Search name, barcode, phone or email"
+            placeholder="Search name, phone or email"
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
@@ -1306,7 +814,7 @@ function Members({ outstanding = false, admin, notify }) {
             }
           >
             {query
-              ? "Try a different name or barcode."
+              ? "Try a different name or phone number."
               : outstanding
                 ? "Members with outstanding towels will appear here."
                 : admin
@@ -1319,7 +827,7 @@ function Members({ outstanding = false, admin, notify }) {
               <thead>
                 <tr>
                   <th>Member</th>
-                  <th>Barcode</th>
+                  <th>Phone</th>
                   <th>Membership</th>
                   <th>{outstanding ? "Return due" : "Status"}</th>
                   <th className="numeric">Towels out</th>
@@ -1339,14 +847,14 @@ function Members({ outstanding = false, admin, notify }) {
                         <Avatar name={m.full_name} />
                         <span>
                           <strong>{m.full_name}</strong>
-                          <small>
-                            {m.phone || m.email || "Member profile"}
-                          </small>
+                          <small>{m.email || "Member profile"}</small>
                         </span>
                       </button>
                     </td>
                     <td>
-                      <code>{m.barcode}</code>
+                      <span className="phone-number">
+                        {formatPhone(m.phone)}
+                      </span>
                     </td>
                     <td>{m.membership}</td>
                     <td>
@@ -1424,9 +932,7 @@ function Members({ outstanding = false, admin, notify }) {
               <Avatar large name={profile.full_name} />
               <div>
                 <h3>{profile.full_name}</h3>
-                <p>
-                  {profile.membership} · <code>{profile.barcode}</code>
-                </p>
+                <p>{profile.membership}</p>
                 <Badge>{profile.active ? "Active" : "Inactive"}</Badge>
               </div>
             </div>
@@ -1447,7 +953,7 @@ function Members({ outstanding = false, admin, notify }) {
               Email<strong>{profile.email || "—"}</strong>
             </span>
             <span>
-              Phone<strong>{profile.phone || "—"}</strong>
+              Phone<strong>{formatPhone(profile.phone)}</strong>
             </span>
             <span>
               Towels out<strong>{profile.outstanding}</strong>
@@ -1473,7 +979,12 @@ function Members({ outstanding = false, admin, notify }) {
                   {profile.history.map((t) => (
                     <tr key={t.id}>
                       <td>
-                        {t.kind === "checkout" ? "Checked out" : "Returned"}
+                        {t.reversal_of
+                          ? "Correction"
+                          : t.kind === "checkout"
+                            ? "Given"
+                            : "Returned"}
+                        {t.corrected ? " · Corrected" : ""}
                       </td>
                       <td>{t.quantity}</td>
                       <td>{dateTime(t.created_at, true)}</td>
@@ -1504,12 +1015,12 @@ function Members({ outstanding = false, admin, notify }) {
 }
 
 const importLabels = {
-  barcode: "Member barcode *",
+  phone: "Phone number *",
+  barcode: "Previous member reference (optional)",
   full_name: "Full name *",
   first_name: "First name",
   last_name: "Last name",
   email: "Email",
-  phone: "Phone",
   membership: "Membership",
   active: "Status",
 };
@@ -1566,9 +1077,9 @@ function ImportModal({ onClose, onSaved }) {
         .replaceAll('\"', '\"\"') +
       '\"';
     const csv =
-      "Row,Barcode,Error\r\n" +
+      "Row,Phone,Error\r\n" +
       preview.errorRows
-        .map((r) => [r.line, "'" + r.barcode, r.error].map(cell).join(","))
+        .map((r) => [r.line, "'" + r.phone, r.error].map(cell).join(","))
         .join("\r\n");
     const url = URL.createObjectURL(
       new Blob([csv], { type: "text/csv;charset=utf-8" }),
@@ -1639,13 +1150,16 @@ function ImportModal({ onClose, onSaved }) {
           />
           <div className="import-guidance">
             <p>
-              <strong>Barcodes are identifiers.</strong> Keep the barcode column
-              formatted as Text in Excel to preserve leading zeros.
+              <strong>Name and phone are all you need.</strong> Use Name and
+              Phone (or Number) headings. Keep phone cells as Text in Excel to
+              preserve the leading zero or country code.
             </p>
             <p>
-              A matching barcode updates the existing profile. Blank optional
-              fields preserve existing details. Towel balances and history are
-              kept.
+              A matching phone and name updates the existing profile. Shared
+              numbers and conflicting names are flagged for review. Blank
+              optional fields preserve existing details and towel history is
+              kept. Edit changed or missing phone numbers in the member profile
+              before re-importing.
             </p>
             <a
               href="/member-import-template.csv"
@@ -1736,7 +1250,7 @@ function ImportModal({ onClose, onSaved }) {
                 <tr>
                   <th>Row</th>
                   <th>Member</th>
-                  <th>Barcode</th>
+                  <th>Phone</th>
                   <th>Result</th>
                 </tr>
               </thead>
@@ -1746,7 +1260,7 @@ function ImportModal({ onClose, onSaved }) {
                     <td>{r.line}</td>
                     <td>{r.data.full_name || "—"}</td>
                     <td>
-                      <code>{r.data.barcode || "—"}</code>
+                      <span>{formatPhone(r.data.phone)}</span>
                     </td>
                     <td>
                       {r.errors.length ? (
@@ -1877,7 +1391,7 @@ function Activity({ admin }) {
           <Search size={19} />
           <input
             aria-label="Search activity"
-            placeholder="Search member or barcode"
+            placeholder="Search member or phone"
             value={q}
             onChange={(e) => {
               setQ(e.target.value);
@@ -1950,7 +1464,7 @@ function Activity({ admin }) {
                   <tr key={t.id}>
                     <td>
                       <strong>{t.full_name}</strong>
-                      <code className="table-sub">{t.barcode}</code>
+                      <span className="table-sub">{formatPhone(t.phone)}</span>
                     </td>
                     <td>
                       <span className={"activity-kind " + t.kind}>
@@ -1959,7 +1473,12 @@ function Activity({ admin }) {
                         ) : (
                           <ArrowDownLeft size={17} />
                         )}{" "}
-                        {t.kind === "checkout" ? "Checked out" : "Returned"}
+                        {t.reversal_of
+                          ? "Correction"
+                          : t.kind === "checkout"
+                            ? "Given"
+                            : "Returned"}
+                        {t.corrected ? " · Corrected" : ""}
                       </span>
                     </td>
                     <td className="numeric">

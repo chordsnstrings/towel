@@ -34,8 +34,8 @@ try {
   await cp(resolve(artifact.path), isolated, { recursive: true });
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("Members");
-  sheet.addRow(["barcode", "full_name"]);
-  sheet.addRow(["000BUNDLE", "Bundle Member"]);
+  sheet.addRow(["Phone", "Name"]);
+  sheet.addRow(["0500000999", "Bundle Member"]);
   await writeFile(
     join(isolated, "members.xlsx"),
     await workbook.xlsx.writeBuffer(),
@@ -55,14 +55,14 @@ try {
     const response = await api(new Request('https://bundle.example.test/api/health'), {ip:'192.0.2.1'});
     assert.equal(response.status, 503, 'Missing production configuration should fail safely');
     assert.equal(response.headers.get('cache-control'), 'no-store');
-    for (const name of ['001_initial.sql','002_login_limits.sql','003_staff_password_change.sql'])
+    for (const name of ['001_initial.sql','002_login_limits.sql','003_staff_password_change.sql','004_phone_desk.sql'])
       assert.ok((await readFile('server/migrations/'+name, 'utf8')).includes('TABLE'));
     for (const extension of ['csv', 'xlsx']) {
-      const buffer = extension==='csv' ? Buffer.from('barcode,full_name\\n000BUNDLE,Bundle Member\\n') : await readFile('members.xlsx');
+      const buffer = extension==='csv' ? Buffer.from('Phone,Name\\n0500000999,Bundle Member\\n') : await readFile('members.xlsx');
       const worker = new Worker(resolve('.netlify/runtime/import-worker.cjs'), { execArgv: [], workerData: {buffer, extension} });
       const result = await new Promise((done, reject) => { worker.once('message',done); worker.once('error',reject); });
       await worker.terminate();
-      assert.equal(result.records[0].cells[0].value, '000BUNDLE');
+      assert.equal(result.records[0].cells[0].value, '0500000999');
     }
     console.log('Netlify package: function loads, SQL files are present, bundled CSV/Excel parser runs.');
   `,

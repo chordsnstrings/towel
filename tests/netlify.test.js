@@ -203,10 +203,10 @@ test("binary Excel multipart uploads survive the Netlify adapter and preserve le
 test("5,000 members import in batches with consistent results on concurrent retries", async () => {
   const form = new FormData();
   const lines = [
-    "barcode,full_name,phone",
+    "Name,Phone",
     ...Array.from(
       { length: 5000 },
-      (_, i) => `BULK-${String(i).padStart(5, "0")},Bulk Member ${i},`,
+      (_, i) => `Bulk Member ${i},050${String(10000 + i).padStart(7, "0")}`,
     ),
   ];
   form.append("file", new Blob([lines.join("\n")]), "bulk.csv");

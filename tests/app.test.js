@@ -119,7 +119,7 @@ test("private member data requires authentication; CSRF and cross-origin writes 
     body: {
       barcode: "001234567890",
       full_name: "Test Member",
-      phone: "001234567890",
+      phone: "0500000100",
       membership: "Shapers",
     },
   });
@@ -346,7 +346,7 @@ test("CSV import previews and commits atomically, preserves zeros, history and b
   );
   const member = (await request("/members/" + memberId)).data;
   assert.equal(member.full_name, "Updated Member");
-  assert.equal(member.phone, "001234567890");
+  assert.equal(member.phone, "+971500000100");
   assert.ok(member.history.length > 0);
   assert.equal(member.active, true);
   assert.equal(
@@ -406,7 +406,7 @@ test("exports neutralize spreadsheet formulas and invalid filters cannot reach S
   assert.equal(csvCell("+123"), '"\'+123"');
   const out = await request("/transactions/export");
   assert.equal(out.status, 200);
-  assert.ok(out.data.includes("'001234567890"));
+  assert.ok(out.data.includes("'+971500000100"));
   assert.equal((await request("/transactions?from=not-a-date")).status, 400);
   assert.equal((await request("/members?q=%27%20OR%201%3D1--")).data.total, 0);
   assert.equal(

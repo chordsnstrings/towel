@@ -19,15 +19,18 @@ import {
   memberSchema,
   memberSelect,
   recordTransaction,
+  undoTransaction,
 } from "./domain.js";
 import {
   commitImport,
   readImportFile,
   suggestMapping,
   validateImport,
+  matchImport,
 } from "./imports.js";
 import { LoginLimitStore } from "./login-limit-store.js";
 import { MAX_IMPORT_BYTES } from "../shared/limits.js";
+import { phoneSearch } from "../shared/phone.js";
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_IMPORT_BYTES, files: 1, fields: 0 },
@@ -37,7 +40,14 @@ const page = (req) =>
   Math.max(0, Math.min(1000000, Number.parseInt(req.query.offset, 10) || 0));
 const limit = 50;
 const txSelect =
-  "SELECT t.*,m.full_name,m.barcode,m.membership,s.name AS staff_name FROM towel_transactions t JOIN members m ON m.id=t.member_id JOIN staff s ON s.id=t.staff_id";
+  "SELECT t.*,m.full_name,m.barcode,m.phone,m.membership,s.name AS staff_name,EXISTS(SELECT 1 FROM towel_transactions correction WHERE correction.reversal_of=t.id) AS corrected FROM towel_transactions t JOIN members m ON m.id=t.member_id JOIN staff s ON s.id=t.staff_id";
+
+function phoneClause(search, params, alias = "m") {
+  params.push(search.kind === "prefix" ? search.key + "%" : search.key);
+  return search.kind === "suffix"
+    ? `right(${alias}.phone_key,4)=$${params.length}`
+    : `${alias}.phone_key ${search.kind === "prefix" ? "LIKE" : "="} $${params.length}`;
+}
 
 export async function createApp(db, config) {
   const app = express();
@@ -68,7 +78,7 @@ export async function createApp(db, config) {
   app.use((req, res, next) => {
     res.setHeader(
       "Permissions-Policy",
-      "camera=(self), microphone=(), geolocation=()",
+      "camera=(), microphone=(), geolocation=()",
     );
     next();
   });
@@ -217,11 +227,9 @@ export async function createApp(db, config) {
   });
   app.use("/api", (req, res, next) => {
     if (req.user.mustChangePassword)
-      return res
-        .status(403)
-        .json({
-          error: "Change your temporary password before using the towel desk.",
-        });
+      return res.status(403).json({
+        error: "Change your temporary password before using the towel desk.",
+      });
     next();
   });
   app.get("/api/settings", async (req, res) =>
@@ -252,7 +260,7 @@ export async function createApp(db, config) {
   app.get("/api/dashboard", async (req, res) => {
     const daily = (
       await db.query(
-        "SELECT COALESCE(SUM(quantity) FILTER (WHERE kind='checkout'),0)::int AS issued,COALESCE(SUM(quantity) FILTER (WHERE kind='return'),0)::int AS returned FROM towel_transactions WHERE (created_at AT TIME ZONE 'Asia/Dubai')::date=(NOW() AT TIME ZONE 'Asia/Dubai')::date",
+        "SELECT COALESCE(SUM(quantity) FILTER (WHERE kind='checkout'),0)::int AS issued,COALESCE(SUM(quantity) FILTER (WHERE kind='return'),0)::int AS returned FROM towel_transactions t WHERE t.reversal_of IS NULL AND NOT EXISTS(SELECT 1 FROM towel_transactions correction WHERE correction.reversal_of=t.id) AND (created_at AT TIME ZONE 'Asia/Dubai')::date=(NOW() AT TIME ZONE 'Asia/Dubai')::date",
       )
     ).rows[0];
     const live = (
@@ -277,19 +285,54 @@ export async function createApp(db, config) {
       );
     res.json(member);
   });
+  app.get("/api/members/search", async (req, res) => {
+    const q = z
+      .string()
+      .trim()
+      .max(160)
+      .parse(req.query.q || "");
+    const mode = z.enum(["phone", "name"]).parse(req.query.mode || "phone");
+    const params = [];
+    let where;
+    if (mode === "phone") {
+      const search = phoneSearch(q);
+      if (!search) return res.json({ rows: [], total: 0, limit: 8 });
+      where = phoneClause(search, params);
+    } else {
+      if (q.length < 2) return res.json({ rows: [], total: 0, limit: 8 });
+      params.push("%" + q.replace(/[\\%_]/g, "\\$&") + "%");
+      where = "m.full_name ILIKE $1";
+    }
+    const total = (
+      await db.query(
+        `SELECT COUNT(*)::int AS count FROM members m WHERE ${where}`,
+        params,
+      )
+    ).rows[0].count;
+    const rows = (
+      await db.query(
+        `${memberSelect} WHERE ${where} ORDER BY m.active DESC,lower(m.full_name),m.id LIMIT 8`,
+        params,
+      )
+    ).rows;
+    res.json({ rows, total, limit: 8 });
+  });
   app.get("/api/members", async (req, res) => {
     const q = String(req.query.q || "")
       .trim()
       .slice(0, 160);
     const status = req.query.status;
+    const params = ["%" + q.replace(/[\\%_]/g, "\\$&") + "%"];
+    const search = phoneSearch(q);
     const clauses = [
-      "(m.full_name ILIKE $1 OR m.barcode ILIKE $1 OR m.phone ILIKE $1 OR m.email ILIKE $1)",
+      "(m.full_name ILIKE $1 OR m.barcode ILIKE $1 OR m.phone ILIKE $1 OR m.email ILIKE $1" +
+        (search ? " OR " + phoneClause(search, params) : "") +
+        ")",
     ];
     if (status === "active") clauses.push("m.active=true");
     if (status === "inactive") clauses.push("m.active=false");
     if (status === "outstanding") clauses.push("COALESCE(l.outstanding,0)>0");
     if (status === "overdue") clauses.push("COALESCE(l.overdue,0)>0");
-    const params = ["%" + q.replace(/[\\%_]/g, "\\$&") + "%"];
     const where = " WHERE " + clauses.join(" AND ");
     const base = memberSelect + where;
     const total = (
@@ -300,7 +343,7 @@ export async function createApp(db, config) {
     ).rows[0].count;
     const rows = (
       await db.query(
-        `${base} ORDER BY ${["outstanding", "overdue"].includes(status) ? "l.due_at ASC," : ""}m.full_name,m.id LIMIT ${limit} OFFSET $2`,
+        `${base} ORDER BY ${["outstanding", "overdue"].includes(status) ? "l.due_at ASC," : ""}m.full_name,m.id LIMIT ${limit} OFFSET $${params.length + 1}`,
         [...params, page(req)],
       )
     ).rows;
@@ -327,14 +370,18 @@ export async function createApp(db, config) {
   });
   app.post("/api/members", adminOnly, async (req, res) => {
     const d = memberSchema.parse(req.body);
+    if (!d.phone && !d.barcode)
+      throw new AppError(400, "A phone number is required for a new member.");
     const memberId = randomUUID();
     const member = await db.transaction(async (tx) => {
+      if (db.kind === "postgres")
+        await tx.query("SELECT pg_advisory_xact_lock(64201902)");
       const m = (
         await tx.query(
           "INSERT INTO members(id,barcode,full_name,email,phone,membership,active,notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *",
           [
             memberId,
-            d.barcode,
+            d.barcode || "MEM-" + memberId,
             d.full_name,
             d.email,
             d.phone,
@@ -353,9 +400,11 @@ export async function createApp(db, config) {
     const d = memberSchema.parse(req.body);
     const memberId = id(req.params.id);
     const member = await db.transaction(async (tx) => {
+      if (db.kind === "postgres")
+        await tx.query("SELECT pg_advisory_xact_lock(64201902)");
       const m = (
         await tx.query(
-          "UPDATE members SET barcode=$1,full_name=$2,email=$3,phone=$4,membership=$5,active=$6,notes=$7,updated_at=NOW() WHERE id=$8 RETURNING *",
+          "UPDATE members SET barcode=COALESCE($1,barcode),full_name=$2,email=$3,phone=$4,membership=$5,active=$6,notes=$7,updated_at=NOW() WHERE id=$8 RETURNING *",
           [
             d.barcode,
             d.full_name,
@@ -376,6 +425,18 @@ export async function createApp(db, config) {
   });
   app.post("/api/transactions", async (req, res) =>
     res.status(201).json(await recordTransaction(db, req.user.id, req.body)),
+  );
+  app.post("/api/transactions/:id/undo", async (req, res) =>
+    res
+      .status(201)
+      .json(
+        await undoTransaction(
+          db,
+          req.user.id,
+          id(req.params.id),
+          id(req.body.requestId),
+        ),
+      ),
   );
   function transactionFilter(req) {
     const values = [],
@@ -403,8 +464,10 @@ export async function createApp(db, config) {
             .replace(/[\\%_]/g, "\\$&") +
           "%",
       );
+      const textIndex = values.length;
+      const search = phoneSearch(String(req.query.q));
       clauses.push(
-        `(m.full_name ILIKE $${values.length} OR m.barcode ILIKE $${values.length})`,
+        `(m.full_name ILIKE $${textIndex} OR m.phone ILIKE $${textIndex} OR m.barcode ILIKE $${textIndex}${search ? " OR " + phoneClause(search, values) : ""})`,
       );
     }
     return {
@@ -446,24 +509,28 @@ export async function createApp(db, config) {
       "Transaction ID",
       "Time (UTC)",
       "Member",
-      "Barcode (text)",
+      "Phone (text)",
       "Action",
       "Towels",
       "Balance after",
       "Staff",
       "Notes",
+      "Corrects transaction",
+      "Corrected",
     ];
     const lines = rows.map((t) =>
       [
         t.id,
         new Date(t.created_at).toISOString(),
         t.full_name,
-        "'" + t.barcode,
+        "'" + t.phone,
         t.kind,
         t.quantity,
         t.balance_after,
         t.staff_name,
         t.notes,
+        t.reversal_of || "",
+        t.corrected ? "Yes" : "No",
       ]
         .map(csvCell)
         .join(","),
@@ -515,17 +582,7 @@ export async function createApp(db, config) {
     if (!job || job.result)
       throw new AppError(410, "Upload the file again to start a new preview.");
     const rows = validateImport(job.raw_data, req.body.mapping);
-    const existing = (
-      await db.query(
-        "SELECT barcode FROM members WHERE barcode=ANY($1::text[])",
-        [rows.map((r) => r.data.barcode).filter(Boolean)],
-      )
-    ).rows;
-    const known = new Set(existing.map((r) => r.barcode));
-    const preview = rows.map((r) => ({
-      ...r,
-      action: known.has(r.data.barcode) ? "update" : "create",
-    }));
+    const preview = await matchImport(db, rows);
     await db.query("UPDATE import_jobs SET preview=$1 WHERE id=$2", [
       JSON.stringify(preview),
       job.id,
@@ -537,6 +594,7 @@ export async function createApp(db, config) {
         .map((r) => ({
           line: r.line,
           barcode: r.data.barcode || "",
+          phone: r.data.phone || "",
           error: r.errors.join(" "),
         })),
       total: preview.length,

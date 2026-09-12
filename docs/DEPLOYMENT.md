@@ -58,7 +58,7 @@ Open the site over HTTPS. On Android/Chrome, choose **Install app** when offered
 
 The service worker caches only public HTML, scripts, styles, fonts and icons. API requests, member data, credentials and towel movements are never placed in offline storage or a background queue. The app shows a reconnect message offline; a checkout or return is recorded only after a server response. Updates wait until existing app windows close, so they do not interrupt a handover.
 
-Allow camera permission and verify the actual tablet or phone can read a member barcode. The front camera is requested first; use the camera switch if its fixed focus cannot read the barcode reliably. Camera frames remain on the device.
+Use the tablet keypad or phone keyboard to enter a complete phone number or its last four digits. Confirm the member's name before giving or returning towels. Name search remains available for profiles with no phone. Add missing numbers through the existing member profile to retain its history. Camera access is not required.
 
 ## Domains and previews
 
@@ -76,7 +76,7 @@ Neon database usage and Netlify hosting usage have separate plan limits. Monitor
 
 ## Operations
 
-- CSV and `.xlsx` uploads support **4 MB**, **5,000 members** and **50 columns**. Preserve barcode columns as text to retain leading zeros. Preview and validate before committing.
+- CSV and `.xlsx` uploads support **4 MB**, **5,000 members** and **50 columns**. Name and Phone/Mobile/Number columns are suggested automatically. Store Excel phone cells as Text. Preview duplicate/shared numbers and identity conflicts before committing.
 - Imports use bounded workers and transactional batches. A failed import rolls back; a committed import can be retried safely.
 - Sessions and login limits are shared in PostgreSQL and survive function restarts. Login throttling uses Netlify's trusted client IP.
 - Each warm function uses a small pool of up to two database connections. Monitor concurrent connection usage as activity grows.
@@ -95,4 +95,4 @@ npm run test:netlify-bundle
 npm audit --omit=dev --audit-level=high
 ```
 
-Tests cover the real API, imports, concurrent towel movements, first-login password changes, session revocation, preview isolation and offline-cache privacy. GitHub Actions runs the suite against PGlite and PostgreSQL 16 and builds the Docker image. The Netlify package check runs the function and CSV/Excel worker in an isolated directory. A live deployment and a physical camera check are still needed before daily use.
+Tests cover the real API, phone lookup, imports, concurrent towel movements and corrections, first-login password changes, session revocation, preview isolation and offline-cache privacy. A DOM test exercises reception's selection, lost-response retries and automatic reset. GitHub Actions runs the suite against PGlite and PostgreSQL 16 and builds the Docker image. The Netlify package check runs the function and CSV/Excel worker in an isolated directory.

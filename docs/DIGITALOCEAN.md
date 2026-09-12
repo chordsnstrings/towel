@@ -40,14 +40,14 @@ For a custom domain, set it as the primary domain and ensure `APP_ORIGIN` matche
 2. Create individual reception accounts under **Settings → Reception team**. Administrators can import members and manage settings; reception staff can search members and record towel movements.
 3. Upload the member list under **Members → Import members**. Review mappings and fix every reported error before committing.
 4. Set the towel limit and return window under **Settings**. The return window applies to new checkouts; existing loan deadlines are preserved.
-5. On the reception device, allow camera access. The scanner requests the **front camera** first. If that camera cannot focus on barcodes, increase the card/phone distance or use the camera-switch button.
+5. On the reception device, enter a phone number or its last four digits and confirm the name. Test shared numbers and the name-search fallback. Add missing phone numbers in existing profiles.
 6. Test one checkout, one partial return and the remaining return. Refresh on a second device to confirm the shared balance. Use an explicitly designated test member and return all its towels after testing.
 
-The scanner reads camera frames locally. It does not record or upload video. Use normal Safari/Chrome/Edge browser tabs over HTTPS, not an embedded third-party in-app browser. Camera permissions cannot be granted silently by this app.
+Use Safari, Chrome or Edge over HTTPS, or install the PWA on the reception device. Phone search requires no camera permission.
 
-Scanning identifies the member; it does not automatically issue or return towels. Staff choose the action and quantity, physically hand over/receive the towels, then confirm. A member with towels outstanding opens in **Return** mode. Partial returns apply to the oldest outstanding loan first. Inactive members can return towels but cannot borrow more.
+Phone lookup shows matching members for name confirmation. Staff choose the action and quantity, physically hand over/receive the towels, then confirm. A member with towels outstanding opens in **Return all** mode. Partial returns apply to the oldest outstanding loan first. Inactive members can return towels but cannot borrow more.
 
-If a connection fails during confirmation, keep the dialog open and retry the same action. The request ID is retained so a successful first request is not recorded twice. If the page was reloaded or the dialog closed, scan again and inspect the current balance/history before initiating another handover.
+If a connection fails during confirmation, keep the screen open and retry the same action. The request ID is retained so a successful first request is not recorded twice. If the page was reloaded, find the member again and inspect their current balance/history before initiating another handover.
 
 ## Operations and backups
 
@@ -56,7 +56,7 @@ If a connection fails during confirmation, keep the dialog open and retry the sa
 - `/api/health` returns a successful response only when the database responds. No member details are returned by this endpoint.
 - Sessions expire after 12 hours. Deactivating a staff account revokes its active sessions immediately.
 - Login rate limiting is process-local. The supplied app runs one instance; use a shared rate-limit store or an upstream rate limiter before increasing the service to multiple replicas. Towel balances and sessions already use the shared database.
-- Towel transactions and audit records are append-only through the API. A recorded physical mistake is corrected with an opposite towel movement and a clear note, preserving the original record.
+- Towel transactions and audit records are append-only through the API. Five-minute Undo creates an audited correction, requires the original operator and refuses a member's superseded movement. It restores original loan deadlines and preserves history.
 - Import staging records are purged after expiry and their raw contents are cleared after a successful import. Original spreadsheet files are not retained on disk.
 - Times and daily totals use `Asia/Dubai`; stored timestamps and CSV export timestamps use UTC.
 
@@ -77,7 +77,7 @@ The script requires 12–200 characters, updates the password hash, revokes sess
 
 `npm test` runs against a temporary in-memory PostgreSQL engine. To exercise a disposable real PostgreSQL database, set `TEST_DATABASE_URL` and run the same test suite. **Never point TEST_DATABASE_URL at a production database.** CI provides a fresh PostgreSQL 16 service for this purpose.
 
-The automated suite covers server behavior and accounting. Device-level camera permission, focus, glare and low-light behavior need the real reception hardware. This project has not been deployed into your DigitalOcean account by the code-authoring session; deployment requires your database attachment and runtime credentials.
+The automated suite covers server behavior, phone reception interactions and accounting. Check touch sizing on the reception device. This deployment option requires your DigitalOcean database attachment and runtime credentials; the configured live app uses Netlify and Neon.
 
 ## Reference documentation
 
