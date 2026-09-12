@@ -2,6 +2,7 @@ import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { createDatabase } from "../server/db.js";
+import { createTestDatabase } from "./database.js";
 import { migrate } from "../server/migrate.js";
 import { createApp } from "../server/app.js";
 import {
@@ -71,7 +72,7 @@ async function login(email, password) {
   };
 }
 before(async () => {
-  db = await createDatabase(config);
+  db = await createTestDatabase(config);
   await migrate(db);
   await migrate(db);
   await bootstrapAdmin(db, config);

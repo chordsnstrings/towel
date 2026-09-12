@@ -2,7 +2,7 @@ import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import ExcelJS from "exceljs";
-import { createDatabase } from "../server/db.js";
+import { createTestDatabase } from "./database.js";
 import { getConfig } from "../server/config.js";
 import { createNetlifyHandler, getNetlifyConfig } from "../server/netlify.js";
 
@@ -67,7 +67,7 @@ async function call(
   };
 }
 before(async () => {
-  db = await createDatabase(
+  db = await createTestDatabase(
     getConfig({
       DATA_DIR: "memory://",
       ...(process.env.TEST_DATABASE_URL
