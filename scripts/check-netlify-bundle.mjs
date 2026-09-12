@@ -55,8 +55,8 @@ try {
     const response = await api(new Request('https://bundle.example.test/api/health'), {ip:'192.0.2.1'});
     assert.equal(response.status, 503, 'Missing production configuration should fail safely');
     assert.equal(response.headers.get('cache-control'), 'no-store');
-    for (const name of ['001_initial.sql','002_login_limits.sql'])
-      assert.ok((await readFile('server/migrations/'+name, 'utf8')).includes('CREATE TABLE'));
+    for (const name of ['001_initial.sql','002_login_limits.sql','003_staff_password_change.sql'])
+      assert.ok((await readFile('server/migrations/'+name, 'utf8')).includes('TABLE'));
     for (const extension of ['csv', 'xlsx']) {
       const buffer = extension==='csv' ? Buffer.from('barcode,full_name\\n000BUNDLE,Bundle Member\\n') : await readFile('members.xlsx');
       const worker = new Worker(resolve('.netlify/runtime/import-worker.cjs'), { execArgv: [], workerData: {buffer, extension} });

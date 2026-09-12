@@ -1,0 +1,12 @@
+{
+  "origin": "https://legendary-fenglisu-a2aad2.netlify.app",
+  "neon": {
+    "projectId": "old-dew-31287598",
+    "branch": "production"
+  },
+  "netlify": {
+    "siteId": "ead4c823-4878-4f19-b5f7-2446b52ffbf7",
+    "configStore": "move-private-config"
+  },
+  "initialAdminEmail": "admin@move.local"
+}

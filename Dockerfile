@@ -6,6 +6,7 @@ COPY index.html vite.config.js ./
 COPY src ./src
 COPY shared ./shared
 COPY public ./public
+COPY scripts/build-pwa.mjs scripts/service-worker.js ./scripts/
 RUN npm run build
 
 FROM node:22-bookworm-slim AS production
@@ -16,6 +17,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 COPY --chown=node:node server ./server
 COPY --chown=node:node shared ./shared
+COPY --chown=node:node app.config.json ./
 COPY --from=build --chown=node:node /app/dist ./dist
 USER node
 EXPOSE 8080

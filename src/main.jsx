@@ -31,6 +31,7 @@ import {
   LockKeyhole,
 } from "lucide-react";
 import Scanner from "./Scanner.jsx";
+import PwaFeatures from "./Pwa.jsx";
 import { api, setCsrf, downloadActivity } from "./api.js";
 import { MAX_IMPORT_BYTES } from "../shared/limits.js";
 import "./styles.css";
@@ -327,6 +328,13 @@ function App() {
       </div>
     );
   if (!session) return <Login onLogin={login} demo={config.demo} />;
+  if (session.user.mustChangePassword)
+    return (
+      <main className="workspace account-setup">
+        <img className="account-logo" src="/move-logo.svg" alt="MOVE at FIVE" />
+        <Account user={session.user} onSaved={login} onLogout={logout} />
+      </main>
+    );
   const admin = session.user.role === "admin";
   const nav = [
     ["desk", "Towel desk", ScanLine],
@@ -371,6 +379,14 @@ function App() {
           </div>
           <button
             className="icon-button"
+            aria-label="My account"
+            title="My account"
+            onClick={() => setPage("account")}
+          >
+            <LockKeyhole size={18} />
+          </button>
+          <button
+            className="icon-button"
             aria-label="Sign out"
             onClick={logout}
           >
@@ -393,6 +409,15 @@ function App() {
           <Members admin={admin} notify={setToast} />
         ) : page === "activity" ? (
           <Activity admin={admin} />
+        ) : page === "account" ? (
+          <Account
+            user={session.user}
+            onSaved={(data) => {
+              setSession(data);
+              setCsrf(data.csrfToken);
+              setToast("Account updated. Other devices have been signed out.");
+            }}
+          />
         ) : (
           <Settings notify={setToast} user={session.user} />
         )}
@@ -1956,6 +1981,146 @@ function Activity({ admin }) {
   );
 }
 
+function Account({ user, onSaved, onLogout }) {
+  const [data, setData] = useState({
+    name: user.name,
+    email: user.email,
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function save(event) {
+    event.preventDefault();
+    setError("");
+    if (data.newPassword !== data.confirmPassword) {
+      setError("The new passwords do not match.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await api("/auth/account", {
+        method: "PUT",
+        body: {
+          name: data.name,
+          email: data.email,
+          currentPassword: data.currentPassword,
+          ...(data.newPassword ? { newPassword: data.newPassword } : {}),
+        },
+      });
+      setData({
+        name: result.user.name,
+        email: result.user.email,
+        currentPassword: "",
+        newPassword: "",
+        confirmPassword: "",
+      });
+      onSaved(result);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="account-panel">
+      <PageTitle
+        title={user.mustChangePassword ? "MAKE IT YOURS" : "YOUR ACCOUNT"}
+      />
+      <section className="settings-card">
+        <div className="section-heading">
+          <h2>
+            {user.mustChangePassword ? "SET YOUR LOGIN" : "LOGIN & SECURITY"}
+          </h2>
+          <LockKeyhole size={21} />
+        </div>
+        <p className="muted">
+          {user.mustChangePassword
+            ? "Replace your temporary password to open the towel desk. You can also choose your name and sign-in email."
+            : "Update your sign-in details. Saving signs out your other devices."}
+        </p>
+        <form onSubmit={save}>
+          <fieldset disabled={busy} className="account-fields">
+            {[
+              ["name", "Full name", "text", "name"],
+              ["email", "Sign-in email", "email", "username"],
+              [
+                "currentPassword",
+                user.mustChangePassword
+                  ? "Temporary password"
+                  : "Current password",
+                "password",
+                "current-password",
+              ],
+              ["newPassword", "New password", "password", "new-password"],
+              [
+                "confirmPassword",
+                "Confirm new password",
+                "password",
+                "new-password",
+              ],
+            ].map(([key, label, type, autocomplete]) => (
+              <label key={key}>
+                {label}
+                <input
+                  type={type}
+                  autoComplete={autocomplete}
+                  required={
+                    !["newPassword", "confirmPassword"].includes(key) ||
+                    user.mustChangePassword ||
+                    !!data.newPassword
+                  }
+                  minLength={
+                    key === "newPassword" || key === "confirmPassword" ? 12 : 1
+                  }
+                  maxLength={key === "email" ? 254 : key === "name" ? 100 : 200}
+                  value={data[key]}
+                  onChange={(event) =>
+                    setData((previous) => ({
+                      ...previous,
+                      [key]: event.target.value,
+                    }))
+                  }
+                />
+                {key === "newPassword" && (
+                  <small>
+                    {user.mustChangePassword
+                      ? "Use at least 12 characters."
+                      : "Use at least 12 characters, or leave blank to keep your password."}
+                  </small>
+                )}
+              </label>
+            ))}
+          </fieldset>
+          <ErrorNotice>{error}</ErrorNotice>
+          <button className="button primary full" disabled={busy}>
+            {busy ? (
+              <Spinner />
+            ) : (
+              <>
+                {user.mustChangePassword
+                  ? "Save & open towel desk"
+                  : "Save account"}
+                <Check size={17} />
+              </>
+            )}
+          </button>
+        </form>
+        {onLogout && (
+          <button
+            className="text-button account-signout"
+            onClick={onLogout}
+            disabled={busy}
+          >
+            Sign out
+          </button>
+        )}
+      </section>
+    </div>
+  );
+}
+
 function Settings({ notify, user }) {
   const [settings, setSettings] = useState(null),
     [staff, setStaff] = useState([]),
@@ -2196,4 +2361,9 @@ function StaffForm({ onClose, onSaved }) {
   );
 }
 
-createRoot(document.getElementById("root")).render(<App />);
+createRoot(document.getElementById("root")).render(
+  <>
+    <App />
+    <PwaFeatures />
+  </>,
+);

@@ -1,10 +1,22 @@
-# Deploy on Netlify
+# Deploy on Netlify with Neon
 
-Netlify serves the React frontend and runs the Express API as a Netlify Function. A managed PostgreSQL database stores the members, towels, staff accounts, sessions and import previews. A separate backend server is not required. This app uses the standard PostgreSQL driver and does not automatically provision Netlify Database.
+Netlify serves the PWA and runs its Express API as a Function. Neon PostgreSQL stores members, towel movements, staff accounts, password hashes, sessions and import previews. The one-time database connection is stored in a private Netlify Blobs key. No manually configured environment variables or `.env` files are needed for this deployment.
 
-## Import the project
+## App configuration
 
-Import `chordsnstrings/towel` from GitHub into Netlify, using `main` and the repository root. The committed `netlify.toml` supplies these settings:
+`app.config.json` identifies the current destination:
+
+| Setting                     | Value                                           |
+| --------------------------- | ----------------------------------------------- |
+| App origin                  | `https://legendary-fenglisu-a2aad2.netlify.app` |
+| Neon project                | `old-dew-31287598`                              |
+| Neon branch                 | `production`                                    |
+| Netlify site                | `ead4c823-4878-4f19-b5f7-2446b52ffbf7`          |
+| Initial administrator email | `admin@move.local`                              |
+
+These are identifiers, not credentials. The initial email is only used when the database has no administrator; changing an account in the app is permanent and cannot be undone by a later deployment.
+
+Import `chordsnstrings/towel` from GitHub into Netlify using `main` and the repository root. `netlify.toml` supplies:
 
 | Setting             | Value                   |
 | ------------------- | ----------------------- |
@@ -13,83 +25,74 @@ Import `chordsnstrings/towel` from GitHub into Netlify, using `main` and the rep
 | Functions directory | `netlify/functions`     |
 | Node version        | `22`                    |
 
-Use a GitHub import so Netlify deploys the function and packaged Excel reader as well as the frontend. Uploading only `dist` is insufficient. The first frontend build can finish before the database is configured; the API returns an unavailable message until setup is complete.
+Use GitHub continuous deployment so the function and packaged Excel reader ship with the frontend. Uploading only `dist` is insufficient. The frontend can build before database setup is complete; the API returns an unavailable message until it has a connection and an administrator.
 
-## Create the database
+## One-time authenticated setup
 
-Use an existing managed PostgreSQL database or create one with [Neon](https://neon.com/):
-
-1. Create a Neon project for the towel desk, choosing a region close to your Netlify Functions region.
-2. Open **Connect** in the project dashboard. Select the production branch, database and role, and turn **Connection pooling** off to show the direct connection string.
-3. Copy the PostgreSQL connection string. Copy only the URL beginning `postgresql://`, without a `psql` command or surrounding quotes.
-4. Save it as the secret `DATABASE_URL` in Netlify using the settings below. Keep the URL private; it contains the database password.
-
-Neon offers a Free plan with usage limits; monitor its [current allowance](https://neon.com/pricing). Netlify hosting and function usage are billed separately. This repository does not select or purchase a paid plan. Use the direct URL for this app's connection-level timeout settings and automatic migrations; it maintains its own small connection pool. See Neon's [direct and pooled connection instructions](https://neon.com/docs/connect/connection-pooling).
-
-This app manages its own versioned migrations in `server/migrations/`. They run automatically when the API initializes; a PostgreSQL advisory transaction lock prevents simultaneous instances from applying them twice. No database changes happen during the frontend build. The database role needs permission to create and update tables in the app's database.
-
-### If a deploy fails with `createSiteDatabase` / `403 Forbidden`
-
-The message `database feature not available for this account` means Netlify refused native database provisioning before the app's build command ran. Earlier versions of this repository included a package that triggered that provisioning. Deploy the latest `main`, which removes that dependency, and configure the external `DATABASE_URL` above. Changing `ADMIN_PASSWORD` or retrying the old commit cannot resolve this account restriction.
-
-## Set environment variables
-
-In **Project configuration → Environment variables**, add the following for the production deployment. If scope selection is available, include **Functions**.
-
-| Variable         | Value                                                                            |
-| ---------------- | -------------------------------------------------------------------------------- |
-| `DATABASE_URL`   | Your provider's direct PostgreSQL connection URL. Mark it as secret.             |
-| `APP_ORIGIN`     | Your final HTTPS origin, such as `https://your-towel-desk.netlify.app`. No path. |
-| `ADMIN_EMAIL`    | The email address of the initial administrator.                                  |
-| `ADMIN_PASSWORD` | A unique password of 12–200 characters. Mark it as secret.                       |
-
-Keep credentials out of GitHub, `netlify.toml`, and variables prefixed with `VITE_`. The frontend uses `/api` on the same site and needs no API URL. The function always uses production settings and forbids demo mode. See [Netlify environment settings](https://docs.netlify.com/build/functions/environment-variables/).
-
-**Redeploy after saving the variables.** Open `/api/health` on the Netlify domain: `{"status":"ok"}` confirms the API and database are ready. Sign in, create reception staff accounts in Settings and import a small member sample before the full list.
-
-The initial administrator is inserted only if that email does not already exist. Updating `ADMIN_PASSWORD` in Netlify does not reset an existing account.
-
-## Custom domains, previews and connection settings
-
-For a custom domain, set it as the Netlify primary domain, update `APP_ORIGIN` to that HTTPS origin and redeploy. Staff should use the canonical address: writes from other origins are rejected.
-
-Keep the production database and administrator settings scoped to production. To use a Deploy Preview interactively, supply its own origin, test administrator settings and separate test `DATABASE_URL`. The app does not automatically create database branches. Without those preview settings, the frontend can build but its API remains unavailable.
-
-Use a database close to the Functions region. Set `DATABASE_CA_CERT` when the provider requires a private CA. TLS certificates are verified and TLS cannot be disabled in production. For Neon, keep its default secure connection settings; no custom CA is normally required. Do not set `DATABASE_SSL=false` in production.
-
-Each warm function instance reuses up to two database connections and closes idle connections after one second. Concurrent instances can open additional connections; monitor your provider's connection limit as use grows. Never use a local filesystem database on Netlify. The alternative Docker/App Platform setup is in [DIGITALOCEAN.md](DIGITALOCEAN.md).
-
-## Operation and limits
-
-- Sessions and login rate limits are stored in PostgreSQL, so they survive function restarts. Login limits are shared across instances and use Netlify's trusted client IP.
-- CSV and `.xlsx` uploads support **4 MB**, **5,000 members** and **50 columns**. The file-size cap leaves room for request encoding overhead. Preserve barcode columns as text to retain leading zeros.
-- The parser worker has a 20-second deadline. Saves use batches within one transaction. A failed import rolls back, and a committed import can be safely retried.
-- Netlify currently allows 60 seconds for synchronous functions; SQL statements time out after 15 seconds. Split the file if an unusually slow database causes an import to time out. [Function limits](https://docs.netlify.com/build/functions/configuration/).
-- API responses are limited to 5 MB. Narrow the activity export date range if needed.
-- Expired records are cleaned during function initialization and relevant operations. No background server or filesystem persistence is needed.
-- Camera frames stay on the reception device. Open the site directly over HTTPS, allow camera access, then verify a checkout and partial/full return on the actual device. The front camera is requested first; switch cameras if it cannot focus.
-
-Use the database provider's backups. A Netlify code rollback does not restore database contents. Check the member balance from a second device before starting daily operation.
-
-## Password recovery
-
-From a trusted local checkout, put the production `DATABASE_URL`, `NODE_ENV=production`, `APP_ORIGIN` and a new `RESET_PASSWORD` in a private `.env.recovery` file. Include `DATABASE_CA_CERT` if required. Obtain the connection details from your database provider. Then run:
+Run these from a trusted checkout with Node 22.13+:
 
 ```bash
-node --env-file=.env.recovery server/reset-password.js staff@example.com
+npm ci
+npm run neon:login
+npm run netlify:login
+npm run neon:link
+npm run neon:plan
+npm run neon:deploy
+npm run setup:netlify
+npm run setup:admin
 ```
 
-Use the existing staff email as the argument. The script revokes that account's sessions and records the reset. Delete the recovery file afterward; it must never be committed.
+Sign in to the Neon and Netlify accounts that own the configured projects. These commands use the locally installed CLIs. `neon:link` and `neon:deploy` disable environment-file pulling. The app-local `neon.ts` contains the requested empty `defineConfig({})`; inspect the plan before applying if the project already has Neon services enabled. `neon deploy` manages Neon configuration; GitHub pushes deploy the web app to Netlify.
+
+`setup:netlify` obtains a direct Neon connection in memory and writes it to the fixed `production-database` key in this site's `move-private-config` store. A temporary file is private and deleted after upload. The connection is never written to GitHub, the frontend, an environment file, or command output. Netlify automatically authorizes server access to its Blob store; [Blobs are encrypted at rest and in transit](https://docs.netlify.com/build/data-and-storage/netlify-blobs/#sensitive-data).
+
+`setup:admin` applies versioned SQL migrations and generates one temporary administrator password. It displays that password once in the trusted terminal and saves only a salted scrypt hash in PostgreSQL. **Do not run this command in public CI logs.** Sign in using the displayed login and choose your own email and password in the app before accessing member data. Repeating the command preserves existing accounts; it never resets them. A changed password signs out other sessions.
+
+After setup, open `/api/health`: `{"status":"ok"}` confirms the API and database are ready. Subsequent GitHub pushes deploy automatically. SQL migrations run when a function starts; a database lock prevents concurrent migration attempts. Deployments preserve accounts and towel records.
+
+The repository also includes app-local Neon skills and an OAuth MCP configuration restricted to the selected project. CLI authentication remains necessary before provider operations can run.
+
+## Install the PWA
+
+Open the site over HTTPS. On Android/Chrome, choose **Install app** when offered or use the browser's installation menu. On iPhone/iPad, use Safari's **Share → Add to Home Screen**. Launch **MOVE Towels** from the home screen for a standalone window. Landscape and portrait layouts remain available.
+
+The service worker caches only public HTML, scripts, styles, fonts and icons. API requests, member data, credentials and towel movements are never placed in offline storage or a background queue. The app shows a reconnect message offline; a checkout or return is recorded only after a server response. Updates wait until existing app windows close, so they do not interrupt a handover.
+
+Allow camera permission and verify the actual tablet or phone can read a member barcode. The front camera is requested first; use the camera switch if its fixed focus cannot read the barcode reliably. Camera frames remain on the device.
+
+## Domains and previews
+
+For a custom domain, make it the Netlify primary domain, update `origin` in `app.config.json`, and deploy. Staff should use the canonical address; writes from other origins are rejected.
+
+The private production connection is loaded only when trusted Netlify context identifies the configured site and a production deployment. Deploy Previews and branch deploys do not automatically connect to live data. Netlify site administrators and code with site-level access can read site-wide Blob stores; only deploy trusted code and build plugins. There is no public API for reading configuration keys.
+
+Legacy `DATABASE_URL` and `APP_ORIGIN` overrides remain supported for isolated preview databases and alternative hosts. If used, keep their scope restricted to the intended context. They are not needed for the configured production setup. Database TLS certificates are verified; TLS cannot be disabled in production.
+
+## If Netlify reports `createSiteDatabase` / `403 Forbidden`
+
+`database feature not available for this account` means native database provisioning was refused before the build command ran. Deploy current `main`, which removes the SDK that triggered native provisioning. This app uses the existing Neon project and does not ask Netlify to create a database.
+
+Neon database usage and Netlify hosting usage have separate plan limits. Monitor [Neon pricing](https://neon.com/pricing) and [Netlify pricing](https://www.netlify.com/pricing/) for the current allowances. This repository does not purchase a paid plan.
+
+## Operations
+
+- CSV and `.xlsx` uploads support **4 MB**, **5,000 members** and **50 columns**. Preserve barcode columns as text to retain leading zeros. Preview and validate before committing.
+- Imports use bounded workers and transactional batches. A failed import rolls back; a committed import can be retried safely.
+- Sessions and login limits are shared in PostgreSQL and survive function restarts. Login throttling uses Netlify's trusted client IP.
+- Each warm function uses a small pool of up to two database connections. Monitor concurrent connection usage as activity grows.
+- Synchronous Netlify Functions currently have a 60-second limit; SQL statements time out after 15 seconds. Use smaller imports if an unusually slow database causes a timeout. [Function configuration](https://docs.netlify.com/build/functions/configuration/).
+- API responses are capped at 5 MB. Narrow activity export dates when needed.
+- Account name, email and password changes are available under **My account**. Operational towel policy and staff management remain under **Settings**.
+
+Use Neon's backups. A code rollback does not restore database contents. Verify balances from a second device before reception use. The alternative Docker deployment and its administrative recovery utility are documented in [DIGITALOCEAN.md](DIGITALOCEAN.md).
 
 ## Verification
 
 ```bash
-npm ci
 npm test
 npm run build:netlify
 npm run test:netlify-bundle
+npm audit --omit=dev --audit-level=high
 ```
 
-Integration tests exercise the function adapter, sessions, CSRF, transactions, binary Excel uploads, 5,000-row imports, concurrent retries, shared rate limits and initialization recovery. GitHub Actions runs them against PGlite and PostgreSQL 16. The package check uses Netlify's bundler and verifies the function, migrations and parser in an isolated directory.
-
-These checks do not provision or deploy a Netlify site. A live deployment and physical camera check are still needed before reception use.
+Tests cover the real API, imports, concurrent towel movements, first-login password changes, session revocation, preview isolation and offline-cache privacy. GitHub Actions runs the suite against PGlite and PostgreSQL 16 and builds the Docker image. The Netlify package check runs the function and CSV/Excel worker in an isolated directory. A live deployment and a physical camera check are still needed before daily use.

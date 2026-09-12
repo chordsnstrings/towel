@@ -1,12 +1,17 @@
+import appSettings from "../app.config.json" with { type: "json" };
+
 export function getConfig(env = process.env) {
   const production = env.NODE_ENV === "production";
+  const appOrigin =
+    env.APP_ORIGIN ||
+    (production ? appSettings.origin : "http://localhost:8080");
   if (production && !env.DATABASE_URL)
     throw new Error("DATABASE_URL is required in production.");
   if (production && env.DEMO_MODE === "true")
     throw new Error("DEMO_MODE must be disabled in production.");
-  if (production && !/^https:\/\//.test(env.APP_ORIGIN || ""))
+  if (production && !/^https:\/\//.test(appOrigin))
     throw new Error("APP_ORIGIN must be the HTTPS application URL.");
-  const origin = new URL(env.APP_ORIGIN || "http://localhost:8080");
+  const origin = new URL(appOrigin);
   if (
     origin.username ||
     origin.password ||

@@ -117,19 +117,24 @@ export async function createApp(db, config) {
         password: z.string().min(1).max(200),
       })
       .parse(req.body);
-    const user = (
-      await db.query("SELECT * FROM staff WHERE email=$1", [
-        data.email.toLowerCase().trim(),
-      ])
-    ).rows[0];
-    const valid = await verifyPassword(
-      data.password,
-      user?.password_hash || dummyHash,
-    );
-    if (!user?.active || !valid)
-      throw new AppError(401, "Email or password is incorrect.");
-    const session = await createSession(db, user, res, config);
-    await audit(db, user.id, "staff.login", user.id);
+    const session = await db.transaction(async (tx) => {
+      // Serialize sign-in with password changes so an old password cannot
+      // create a new session after the change has revoked existing sessions.
+      const user = (
+        await tx.query("SELECT * FROM staff WHERE email=$1 FOR UPDATE", [
+          data.email.toLowerCase().trim(),
+        ])
+      ).rows[0];
+      const valid = await verifyPassword(
+        data.password,
+        user?.password_hash || dummyHash,
+      );
+      if (!user?.active || !valid)
+        throw new AppError(401, "Email or password is incorrect.");
+      const result = await createSession(tx, user, res, config);
+      await audit(tx, user.id, "staff.login", user.id);
+      return result;
+    });
     res.json(session);
   });
   if (config.demo)
@@ -155,6 +160,69 @@ export async function createApp(db, config) {
       path: "/",
     });
     res.json({ ok: true });
+  });
+  app.put("/api/auth/account", loginLimiter, async (req, res) => {
+    const data = z
+      .object({
+        name: z.string().trim().min(1).max(100),
+        email: z.email().max(254),
+        currentPassword: z.string().min(1).max(200),
+        newPassword: z.string().min(12).max(200).optional(),
+      })
+      .parse(req.body);
+    const session = await db.transaction(async (tx) => {
+      const user = (
+        await tx.query("SELECT * FROM staff WHERE id=$1 FOR UPDATE", [
+          req.user.id,
+        ])
+      ).rows[0];
+      if (
+        !user?.active ||
+        !(await verifyPassword(data.currentPassword, user.password_hash))
+      )
+        throw new AppError(400, "Your current password is incorrect.");
+      if (user.must_change_password && !data.newPassword)
+        throw new AppError(
+          400,
+          "Choose a new password to replace the temporary password.",
+        );
+      if (
+        data.newPassword &&
+        (await verifyPassword(data.newPassword, user.password_hash))
+      )
+        throw new AppError(
+          400,
+          "Choose a password different from your current password.",
+        );
+      const updated = (
+        await tx.query(
+          "UPDATE staff SET name=$1,email=$2,password_hash=$3,must_change_password=false WHERE id=$4 RETURNING *",
+          [
+            data.name,
+            data.email.toLowerCase().trim(),
+            data.newPassword
+              ? await hashPassword(data.newPassword)
+              : user.password_hash,
+            user.id,
+          ],
+        )
+      ).rows[0];
+      await tx.query("DELETE FROM sessions WHERE staff_id=$1", [user.id]);
+      await audit(tx, user.id, "staff.account.update", user.id, {
+        passwordChanged: !!data.newPassword,
+      });
+      return createSession(tx, updated, res, config);
+    });
+    res.json(session);
+  });
+  app.use("/api", (req, res, next) => {
+    if (req.user.mustChangePassword)
+      return res
+        .status(403)
+        .json({
+          error: "Change your temporary password before using the towel desk.",
+        });
+    next();
   });
   app.get("/api/settings", async (req, res) =>
     res.json(

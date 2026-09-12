@@ -4,7 +4,11 @@ import { randomUUID } from "node:crypto";
 import { createDatabase } from "../server/db.js";
 import { migrate } from "../server/migrate.js";
 import { createApp } from "../server/app.js";
-import { bootstrapAdmin } from "../server/auth.js";
+import {
+  bootstrapAdmin,
+  provisionInitialAdmin,
+  verifyPassword,
+} from "../server/auth.js";
 import { getConfig } from "../server/config.js";
 import { recordTransaction, csvCell } from "../server/domain.js";
 import {
@@ -457,4 +461,101 @@ test("staff deactivation revokes sessions; production cannot enable demo or use 
   const loggedOut = await request("/auth/logout", { method: "POST" });
   assert.equal(loggedOut.status, 200);
   assert.equal((await request("/members")).status, 401);
+});
+
+test("temporary logins must be changed in the app; old sessions and deployment credentials cannot restore access", async () => {
+  await db.query("DELETE FROM login_limits");
+  await db.query("UPDATE staff SET must_change_password=true WHERE id=$1", [
+    admin.user.id,
+  ]);
+  const first = await login(config.adminEmail, password);
+  const second = await login(config.adminEmail, password);
+  assert.equal(first.user.mustChangePassword, true);
+  assert.equal((await request("/members", { auth: first })).status, 403);
+  const account = {
+    name: "Desk Owner",
+    email: "owner@example.test",
+    currentPassword: password,
+  };
+  const update = (body, options = {}) =>
+    request("/auth/account", { method: "PUT", auth: first, body, ...options });
+  assert.equal(
+    (
+      await update(
+        { ...account, newPassword: "New-private-password-587" },
+        { csrf: false },
+      )
+    ).status,
+    403,
+  );
+  assert.equal((await update(account)).status, 400);
+  assert.equal(
+    (
+      await update({
+        ...account,
+        currentPassword: "incorrect",
+        newPassword: "New-private-password-587",
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (await update({ ...account, newPassword: password })).status,
+    400,
+  );
+  const changed = await update({
+    ...account,
+    newPassword: "New-private-password-587",
+  });
+  assert.equal(changed.status, 200, JSON.stringify(changed.data));
+  assert.equal(changed.data.user.mustChangePassword, false);
+  assert.equal(changed.data.user.email, account.email);
+  assert.equal((await request("/auth/me", { auth: first })).status, 401);
+  assert.equal((await request("/auth/me", { auth: second })).status, 401);
+  const fresh = {
+    cookie: changed.headers.get("set-cookie").split(";")[0],
+    csrf: changed.data.csrfToken,
+    user: changed.data.user,
+  };
+  assert.equal((await request("/members", { auth: fresh })).status, 200);
+  assert.equal(
+    (
+      await request("/auth/login", {
+        method: "POST",
+        auth: null,
+        body: { email: account.email, password },
+      })
+    ).status,
+    401,
+  );
+  await login(account.email, "New-private-password-587");
+  await bootstrapAdmin(db, config);
+  await bootstrapAdmin(db, { demo: false });
+  const repeated = await provisionInitialAdmin(db, {
+    email: "another@example.test",
+    password,
+  });
+  assert.equal(repeated.created, false);
+  assert.equal(
+    (await db.query("SELECT id FROM staff WHERE email=$1", [config.adminEmail]))
+      .rows.length,
+    0,
+  );
+  const stored = (
+    await db.query("SELECT password_hash FROM staff WHERE email=$1", [
+      account.email,
+    ])
+  ).rows[0];
+  assert.notEqual(stored.password_hash, "New-private-password-587");
+  assert.equal(
+    await verifyPassword("New-private-password-587", stored.password_hash),
+    true,
+  );
+  const audit = await db.query(
+    "SELECT detail FROM audit_log WHERE action='staff.account.update'",
+  );
+  assert.equal(
+    JSON.stringify(audit.rows).includes("New-private-password-587"),
+    false,
+  );
 });

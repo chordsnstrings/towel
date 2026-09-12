@@ -311,6 +311,61 @@ label:has(> span) {
   background: #272727;
   color: #fff;
 }
+.pwa-install,
+.pwa-offline {
+  position: fixed;
+  z-index: 80;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  left: max(16px, env(safe-area-inset-left));
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border: 1px solid #deded8;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 8px 30px #00000015;
+  max-width: calc(100vw - 32px);
+}
+.pwa-offline {
+  background: #fff5dd;
+  color: #5d4308;
+  font-size: 13px;
+}
+.pwa-offline svg {
+  flex-shrink: 0;
+}
+.pwa-guide {
+  max-width: 440px;
+}
+.pwa-guide p {
+  line-height: 1.7;
+}
+.pwa-guide p svg {
+  vertical-align: middle;
+}
+.account-panel {
+  max-width: 560px;
+  margin: 0 auto;
+}
+.account-setup {
+  padding-top: 40px;
+  padding-bottom: 40px;
+}
+.account-logo {
+  display: block;
+  width: 84px;
+  margin: 0 auto 32px;
+}
+.account-fields {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.account-signout {
+  margin-top: 24px;
+}
 .staff-menu {
   display: flex;
   align-items: center;

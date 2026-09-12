@@ -10,6 +10,8 @@ A reception web app for MOVE at FIVE Jumeirah Village. Scan a member’s existin
 - **Member directory** with add/edit, search, active/inactive status, contact details, membership type and towel history.
 - **Excel `.xlsx` and CSV import** with column mapping, preview, row validation, barcode deduplication and transactional upserts. Leading-zero identifiers are preserved; numeric Excel barcode cells are rejected with a corrective message.
 - **Staff and administrator accounts** with hashed passwords, database sessions, role checks, CSRF protection, login rate limiting and a transaction audit trail.
+- **Installable PWA** for tablets and phones, with branded home-screen icons, a standalone window and an offline public shell. Towel operations require a connection; private records are never cached.
+- **In-app account settings** for email and password changes, including a required password change for the first temporary administrator login.
 - **Activity filters and CSV export**, Dubai time throughout the desk, responsive touch controls and reduced-motion support.
 - **Netlify deployment configuration**, an Express API function, managed PostgreSQL support, health checks, migrations and CI. A Docker/App Platform deployment is also available.
 
@@ -21,14 +23,11 @@ Requires Node.js 22.13+ and npm.
 
 ```bash
 npm ci
-cp .env.example .env
-```
-
-Edit `.env`: set your administrator email and a unique password of at least 12 characters. Then:
-
-```bash
+npm run setup:admin -- --local
 npm run dev
 ```
+
+The setup command displays a generated temporary login once. Sign in, then choose your email and password in the app. No `.env` file is needed. Repeating setup preserves the existing administrator.
 
 Open **http://localhost:8080**. Without `DATABASE_URL`, development uses embedded PostgreSQL (PGlite) persisted at `data/local`. A database server is not needed for local evaluation. The real deployment always requires PostgreSQL and never stores operational data on the app’s local disk.
 
@@ -45,11 +44,18 @@ Choose **Open demo desk**, then scan or type `DEMO-001`. This route is unavailab
 The complete guide is [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). The short path:
 
 1. Import this GitHub repository into Netlify, using `main`. [`netlify.toml`](netlify.toml) configures the frontend and backend build.
-2. Create a PostgreSQL database with a managed provider such as [Neon](https://neon.com/). For Neon, open **Connect**, turn **Connection pooling** off, and copy the direct connection string into a secret `DATABASE_URL` in Netlify's environment settings.
-3. Set `APP_ORIGIN` to your final HTTPS site origin, plus `ADMIN_EMAIL` and a unique secret `ADMIN_PASSWORD`, in the same settings. Include the Functions scope if scope selection is available.
-4. Redeploy, sign in, add staff accounts and import members. Database migrations run automatically before API requests are served.
+2. Run the one-time authenticated setup in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). The app targets Neon project `old-dew-31287598`, branch `production`, and the configured Netlify site.
+3. Sign in with the generated temporary administrator login, choose your own credentials in the app, and import members.
 
-Netlify hosts both the frontend and backend; operational data survives restarts in the PostgreSQL database you configure. `DATABASE_URL` is required. The app does not request Netlify's native database feature, so accounts without that feature can deploy it. The [Netlify guide](docs/DEPLOYMENT.md) covers setup, limits and recovery; the [DigitalOcean guide](docs/DIGITALOCEAN.md) covers the alternative Docker deployment.
+Site/project identifiers and the HTTPS origin live in `app.config.json`. The database connection is saved in the site's private Netlify Blobs store; administrator emails and password hashes are in PostgreSQL. No manual Netlify environment variables are required. Later GitHub pushes deploy automatically, and migrations run automatically when the API starts.
+
+Netlify hosts the frontend and backend. Neon stores the operational data. This app does not request Netlify's native database feature, so it avoids the account's native-database provisioning error. The [DigitalOcean guide](docs/DIGITALOCEAN.md) remains available for an alternative Docker deployment.
+
+## Install on a tablet or phone
+
+Open the HTTPS site, then use **Install app** when offered. On iPhone or iPad, open it in Safari and choose **Share → Add to Home Screen**. Launch **MOVE Towels** from the home screen. The scanner requests the front camera first and provides a camera switch.
+
+Only the public app shell is stored offline. Member records, account details and towel movements always use the server. Reconnect before recording a checkout or return. Updates activate after all existing app windows close, avoiding an interruption during a handover.
 
 ## Member import
 

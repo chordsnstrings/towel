@@ -21,15 +21,16 @@ export async function verifyPassword(password, encoded) {
   return expected.length === key.length && timingSafeEqual(expected, key);
 }
 export async function bootstrapAdmin(db, config) {
+  // Once provisioned, the database owns this account. Stale deployment settings
+  // must never recreate an old login after the administrator changes their email.
+  const existing = await db.query(
+    "SELECT id FROM staff WHERE role='admin' AND active=true LIMIT 1",
+  );
+  if (existing.rows.length || config.demo) return;
   if (!config.adminEmail || !config.adminPassword) {
-    const { rows } = await db.query(
-      "SELECT id FROM staff WHERE role='admin' AND active=true LIMIT 1",
+    throw new Error(
+      "Provision the first administrator with npm run setup:admin.",
     );
-    if (!rows.length && !config.demo)
-      throw new Error(
-        "Set ADMIN_EMAIL and ADMIN_PASSWORD (at least 12 characters) for first-time setup.",
-      );
-    return;
   }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(config.adminEmail))
     throw new Error("Set a valid ADMIN_EMAIL.");
@@ -39,10 +40,45 @@ export async function bootstrapAdmin(db, config) {
     /^(change|replace|example)/i.test(config.adminPassword)
   )
     throw new Error("Use a unique ADMIN_PASSWORD of 12–200 characters.");
-  await db.query(
-    "INSERT INTO staff(id,email,name,password_hash,role) VALUES ($1,$2,'Administrator',$3,'admin') ON CONFLICT(email) DO NOTHING",
-    [randomUUID(), config.adminEmail, await hashPassword(config.adminPassword)],
-  );
+  await provisionInitialAdmin(db, {
+    email: config.adminEmail,
+    password: config.adminPassword,
+    temporary: false,
+  });
+}
+export async function provisionInitialAdmin(
+  db,
+  { email, password, name = "Administrator", temporary = true },
+) {
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254)
+    throw new Error("Use a valid administrator email.");
+  if (!password || password.length < 12 || password.length > 200)
+    throw new Error("Use a password of 12–200 characters.");
+  return db.transaction(async (tx) => {
+    if (db.kind === "postgres")
+      await tx.query("SELECT pg_advisory_xact_lock(64201903)");
+    const existing = (
+      await tx.query("SELECT id,email FROM staff WHERE role='admin' LIMIT 1")
+    ).rows[0];
+    if (existing) return { ...existing, created: false };
+    const staff = (
+      await tx.query(
+        "INSERT INTO staff(id,email,name,password_hash,role,must_change_password) VALUES ($1,$2,$3,$4,'admin',$5) RETURNING id,email",
+        [
+          randomUUID(),
+          email.toLowerCase().trim(),
+          name,
+          await hashPassword(password),
+          temporary,
+        ],
+      )
+    ).rows[0];
+    await tx.query(
+      "INSERT INTO audit_log(staff_id,action,entity_id) VALUES ($1,'staff.provision',$2)",
+      [staff.id, staff.id],
+    );
+    return { ...staff, created: true };
+  });
 }
 export async function createSession(db, staff, res, config) {
   const token = randomBytes(32).toString("hex");
@@ -66,6 +102,7 @@ export async function createSession(db, staff, res, config) {
       name: staff.name,
       email: staff.email,
       role: staff.role,
+      mustChangePassword: !!staff.must_change_password,
     },
     csrfToken,
   };
@@ -80,7 +117,7 @@ export function authMiddleware(db) {
     if (!token || !/^[a-f0-9]{64}$/.test(token))
       return res.status(401).json({ error: "Please sign in to continue." });
     const { rows } = await db.query(
-      "SELECT s.*,u.name,u.email,u.role,u.active FROM sessions s JOIN staff u ON u.id=s.staff_id WHERE token_hash=$1 AND expires_at>NOW()",
+      "SELECT s.*,u.name,u.email,u.role,u.active,u.must_change_password FROM sessions s JOIN staff u ON u.id=s.staff_id WHERE token_hash=$1 AND expires_at>NOW()",
       [hashToken(token)],
     );
     const session = rows[0];
@@ -93,6 +130,7 @@ export function authMiddleware(db) {
       name: session.name,
       email: session.email,
       role: session.role,
+      mustChangePassword: !!session.must_change_password,
     };
     req.session = session;
     if (

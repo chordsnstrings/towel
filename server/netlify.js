@@ -7,6 +7,7 @@ import { createDatabase } from "./db.js";
 import { migrate } from "./migrate.js";
 import { bootstrapAdmin } from "./auth.js";
 import { createApp } from "./app.js";
+import { loadPrivateConfig } from "./private-config.js";
 
 export function getNetlifyConfig(env = process.env) {
   return {
@@ -21,12 +22,17 @@ export function getNetlifyConfig(env = process.env) {
 }
 
 export function createNetlifyHandler({
-  loadConfig = getNetlifyConfig,
+  loadConfig = async (context) => ({
+    ...(await loadPrivateConfig(context)),
+    serverless: true,
+    importWorkerPath: resolve(".netlify/runtime/import-worker.cjs"),
+    migrationsDirectory: pathToFileURL(resolve("server/migrations") + "/"),
+  }),
   connect = createDatabase,
 } = {}) {
   let ready;
-  async function initialize() {
-    const config = loadConfig();
+  async function initialize(context) {
+    const config = await loadConfig(context);
     const db = await connect(config);
     try {
       await migrate(db, config.migrationsDirectory);
@@ -49,7 +55,7 @@ export function createNetlifyHandler({
   return async (request, context = {}) => {
     let handle;
     try {
-      ready ||= initialize().catch((error) => {
+      ready ||= initialize(context).catch((error) => {
         ready = undefined; // A transient database outage must not poison a warm instance.
         throw error;
       });

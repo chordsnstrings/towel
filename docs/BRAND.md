@@ -7,7 +7,7 @@ The interface follows MOVE at FIVE’s monochrome identity: black surfaces, whit
 - [Official MOVE at FIVE, Jumeirah Village](https://jumeirahvillage.fivehotelsandresorts.com/spa-wellbeing/the-gym/)
 - [Official July pricing artwork](https://jumeirahvillage.fivehotelsandresorts.com/wp-content/uploads/2026/07/GYM-PRICING-July.pdf)
 
-`public/move-logo.svg` contains the original MOVE at FIVE vector paths extracted from that official pricing artwork. The paths have not been redrawn. The source artwork contains the distinctive M and E forms plus the AT FIVE arrow.
+`public/move-logo.svg` contains the original MOVE at FIVE vector paths extracted from that official pricing artwork. The paths have not been redrawn. The PWA icons in `public/icons/` use these same paths on a black background, with padding for rounded and maskable home-screen icons. The source artwork contains the distinctive M and E forms plus the AT FIVE arrow.
 
 The current official website uses Nimbus Sans D OT Bold Extended for headings. This project bundles the open-source Nimbus Sans Bold fallback from URW Base35 for a self-contained, reliable deployment; it is not the exact proprietary extended font. If the gym supplies its licensed webfont, replace `public/fonts/nimbus-sans-bold.otf` and the `@font-face` definition in `src/styles.css` to make the heading typography exact. The included font’s license is in `public/fonts/LICENSE.txt`.
 
